@@ -21,6 +21,29 @@ services:
     #   - /dev/ttyUSB0:/dev/ttyUSB0
 ```
 
+### Docker Run Example
+
+You can also run the BBS server with a single `docker run` command:
+
+```bash
+docker run -d \
+  --name tc2-bbs-mesh \
+  --restart always \
+  -v $(pwd)/config:/home/mesh/bbs/config \
+  thealhu/tc2-bbs-mesh:latest
+```
+
+If you need to include USB devices, add them with the `--device` flag:
+
+```bash
+docker run -d \
+  --name tc2-bbs-mesh \
+  --restart always \
+  -v $(pwd)/config:/home/mesh/bbs/config \
+  --device /dev/ttyUSB0:/dev/ttyUSB0 \
+  thealhu/tc2-bbs-mesh:latest
+```
+
 ### First Run
 When you first run the container, it will automatically detect if your `./config` directory is empty. It will initialize it with:
 - `config.ini`: The main configuration file (copied from `example_config.ini`).
