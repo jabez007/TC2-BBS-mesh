@@ -1,5 +1,5 @@
 # Stage 1: Build stage to clone the repo
-FROM debian:stable-slim AS build
+FROM debian:12-slim AS build
 
 RUN apt-get update && \
   apt-get install -y \
@@ -11,15 +11,15 @@ RUN git clone https://github.com/TheCommsChannel/TC2-BBS-mesh.git
 
 ####
 
-# Stage 2: App stage using python:alpine to minimize final image
-FROM python:alpine
+# Stage 2: App stage using python:3.12-alpine to minimize final image
+FROM python:3.12-alpine
 
 # Install healthcheck script (assumes context is the docker/ directory)
 COPY healthcheck.py /usr/local/bin/healthcheck.py
 RUN chmod a+x /usr/local/bin/healthcheck.py
 
-# Switch to non-root user
-RUN adduser --disabled-password mesh
+# Switch to non-root user with explicit UID 1000
+RUN adduser -D -u 1000 mesh
 USER mesh
 RUN mkdir -p /home/mesh/bbs
 WORKDIR /home/mesh/bbs
@@ -42,7 +42,7 @@ RUN chmod a+x /usr/local/bin/entrypoint.sh
 
 # Add robust healthcheck
 HEALTHCHECK --interval=20s --timeout=10s --start-period=40s --retries=2 \
-  CMD /usr/local/bin/healthcheck.py || exit 1
+  CMD /usr/local/bin/healthcheck.py
 
 # Use the entrypoint script to handle config/database paths
 ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
