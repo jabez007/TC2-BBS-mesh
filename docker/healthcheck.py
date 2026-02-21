@@ -73,9 +73,9 @@ def check_process_health():
                 with open(os.path.join('/proc', pid, 'cmdline'), 'rb') as f:
                     cmdline = f.read().decode('utf-8', errors='ignore')
                     if 'server.py' in cmdline:
-                        found = True
                         # Test if process is responsive
                         os.kill(int(pid), 0)
+                        found = True
                         break
             except (OSError, IOError):
                 continue
