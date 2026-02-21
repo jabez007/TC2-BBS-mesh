@@ -1,4 +1,4 @@
-# From original Dockerfile at https://github.com/TheCommsChannel/TC2-BBS-mesh
+# Stage 1: Build stage to clone the repo
 FROM debian:stable-slim AS build
 
 RUN apt-get update && \
@@ -11,8 +11,10 @@ RUN git clone https://github.com/TheCommsChannel/TC2-BBS-mesh.git
 
 ####
 
+# Stage 2: App stage using python:alpine to minimize final image
 FROM python:alpine
 
+# Install healthcheck script (assumes context is the docker/ directory)
 COPY healthcheck.py /usr/local/bin/healthcheck.py
 RUN chmod a+x /usr/local/bin/healthcheck.py
 
@@ -22,22 +24,25 @@ USER mesh
 RUN mkdir -p /home/mesh/bbs
 WORKDIR /home/mesh/bbs
 
-# Install Python dependencies
+# Install Python dependencies from requirements.txt in the repo
 COPY --from=build /TC2-BBS-mesh/requirements.txt ./
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Copy over app code
+# Copy over app code and examples for initialization
 COPY --from=build /TC2-BBS-mesh/*.py ./
+COPY --from=build /TC2-BBS-mesh/example_config.ini ./
+COPY --from=build /TC2-BBS-mesh/examples/ ./examples/
 
 # Define config volume
 VOLUME /home/mesh/bbs/config
-WORKDIR /home/mesh/bbs/config
-COPY --from=build /TC2-BBS-mesh/example_config.ini ./config.ini
-COPY --from=build /TC2-BBS-mesh/fortunes.txt ./
 
-# Add robust healthcheck - tests meshtasticd connection and detects broken pipe scenarios
+# Copy and setup entrypoint script (assumes context is the docker/ directory)
+COPY --chown=mesh:mesh configini.sh /usr/local/bin/entrypoint.sh
+RUN chmod a+x /usr/local/bin/entrypoint.sh
+
+# Add robust healthcheck
 HEALTHCHECK --interval=20s --timeout=10s --start-period=40s --retries=2 \
   CMD /usr/local/bin/healthcheck.py || exit 1
 
-# Define the command to run
-ENTRYPOINT [ "python3", "/home/mesh/bbs/server.py" ]
+# Use the entrypoint script to handle config/database paths
+ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
