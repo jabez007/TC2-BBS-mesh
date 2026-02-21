@@ -31,7 +31,7 @@ def check_meshtastic_connection(host="localhost", port=4403):
 
         # Send a 2-byte protobuf heartbeat
         heartbeat_msg = b"\x08\x01"
-        s.send(heartbeat_msg)
+        s.sendall(heartbeat_msg)
 
         # Try to read response, but treat timeout as success (ping sent)
         s.settimeout(2)
@@ -94,18 +94,24 @@ def check_process_health():
 config = get_config()
 interface_type = "serial"
 hostname = "localhost"
+tcp_port = 4403
 
 if config and 'interface' in config:
     interface_type = config['interface'].get('type', 'serial').lower()
     hostname = config['interface'].get('hostname', 'localhost')
+    # Try to get port, default to 4403 for TCP
+    try:
+        tcp_port = config['interface'].getint('port', 4403)
+    except (ValueError, configparser.NoOptionError):
+        tcp_port = 4403
 
 print(f"Detected interface: {interface_type}")
 
 if interface_type == "tcp":
-    print(f"Running TCP connection health check to {hostname}...")
+    print(f"Running TCP connection health check to {hostname}:{tcp_port}...")
     connection_ok = False
     for attempt in range(3):
-        if check_meshtastic_connection(host=hostname):
+        if check_meshtastic_connection(host=hostname, port=tcp_port):
             connection_ok = True
             print(f"Connection test attempt {attempt + 1}: PASS")
             break
