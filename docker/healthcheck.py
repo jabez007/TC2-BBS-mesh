@@ -40,10 +40,11 @@ def check_meshtastic_connection(host="localhost", port=4403):
             if response == b"":  # EOF
                 return False
         except socket.timeout:
-            # Timeout is okay, it means the connection is alive and didn't close
-            pass
+            # Timeout is okay, it means the connection is alive
+            return True
+        else:
+            return True
 
-        return True
     except (
         ConnectionResetError,
         BrokenPipeError,
@@ -51,9 +52,6 @@ def check_meshtastic_connection(host="localhost", port=4403):
         socket.timeout,
     ) as e:
         print(f"Connection test to {host}:{port} failed: {e}")
-        return False
-    except Exception as e:
-        print(f"Unexpected connection error: {e}")
         return False
     finally:
         if s:
