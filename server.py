@@ -14,11 +14,13 @@ other BBS servers listed in the config.ini file.
 
 import logging
 import time
+import socket
+import threading
 
 from config_init import initialize_config, get_interface, init_cli_parser, merge_config
 from db_operations import initialize_database
 from js8call_integration import JS8CallClient
-from message_processing import on_receive
+from message_processing import on_receive, shutdown_executor
 from pubsub import pub
 
 # General logging
@@ -83,7 +85,6 @@ def main():
                     js8call_client = JS8CallClient(interface)
                     js8call_client.logger = js8call_logger
                     if js8call_client.db_conn:
-                        import threading
                         js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
                         js8_thread.start()
                 else:
@@ -91,7 +92,6 @@ def main():
                     js8call_client.interface = interface
                     # Restart JS8Call connection if it died
                     if not js8call_client.connected and js8call_client.db_conn:
-                        import threading
                         js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
                         js8_thread.start()
 
@@ -99,16 +99,27 @@ def main():
 
                 # Main wait loop - monitoring connection if possible
                 while True:
-                    # Update heartbeat file for Docker healthcheck
+                    # 1. Update heartbeat file ONLY if we are supposedly connected
                     try:
                         with open('/tmp/bbs_heartbeat', 'w') as f:
                             f.write(str(time.time()))
                     except Exception:
                         pass
 
+                    # 2. Aggressive socket watchdog for TCP interfaces
+                    if system_config['interface_type'] == 'tcp' and hasattr(interface, 'socket') and interface.socket:
+                        try:
+                            # Using b"" is safe for Meshtastic framing but triggers OS-level BrokenPipe check
+                            interface.socket.send(b"", socket.MSG_DONTWAIT)
+                        except (BrokenPipeError, OSError):
+                            logging.error("Detected BrokenPipe in underlying TCP socket watchdog.")
+                            break
+
+                    # 3. Regular interface connectivity check
                     if hasattr(interface, 'isConnected') and not interface.isConnected():
                         logging.error("Meshtastic interface disconnected.")
                         break
+                    
                     time.sleep(5)
 
             except Exception as e:
@@ -119,7 +130,7 @@ def main():
                     try:
                         interface.close()
                     except Exception:
-                        pass
+                        logging.exception("Error closing interface in main loop finally")
                 pub.unsubAll(system_config['mqtt_topic'])
 
     except KeyboardInterrupt:
@@ -127,14 +138,19 @@ def main():
     finally:
         if interface:
             try:
+                logging.info("Closing Meshtastic interface...")
                 interface.close()
             except Exception:
-                pass
+                logging.exception("Error closing Meshtastic interface during shutdown")
+        
         if js8call_client and js8call_client.connected:
             try:
+                logging.info("Closing JS8Call connection...")
                 js8call_client.close()
             except Exception:
-                pass
+                logging.exception("Error closing JS8Call client during shutdown")
+        
+        shutdown_executor()
 
 if __name__ == "__main__":
     main()

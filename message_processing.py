@@ -6,6 +6,10 @@ from meshtastic import BROADCAST_NUM
 # Use a thread pool to process messages without blocking the Meshtastic interface thread
 executor = ThreadPoolExecutor(max_workers=5)
 
+def shutdown_executor():
+    logging.info("Shutting down message processing executor...")
+    executor.shutdown(wait=False, cancel_futures=True)
+
 from command_handlers import (
     handle_mail_command, handle_bulletin_command, handle_help_command, handle_stats_command, handle_fortune_command,
     handle_bb_steps, handle_mail_steps, handle_stats_steps, handle_wall_of_shame_command,

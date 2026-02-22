@@ -28,15 +28,15 @@ def get_config():
 
 
 def check_meshtastic_connection(host="localhost", port=4403):
-    """Test if the meshtastic TCP API port is open and bidirectional"""
+    """Test if the meshtastic TCP API port is open (safely)"""
     s = None
     try:
         # 1. Test the Handshake
         s = socket.create_connection((host, port), timeout=3)
         
         # 2. Test the WRITE side to catch BrokenPipeError
-        # Sending a newline is safe; it's generally ignored by protobuf but forces a write
-        s.sendall(b"\n")
+        # Using b"" is safe for Meshtastic framing (0x94 0xC3 ...) but forces a write
+        s.send(b"", socket.MSG_DONTWAIT)
         
         # 3. Test the READ side to ensure the remote hasn't hung up
         s.settimeout(1)
@@ -49,7 +49,7 @@ def check_meshtastic_connection(host="localhost", port=4403):
             pass
             
     except OSError as e:
-        print(f"Connection test to {host}:{port} failed: {e}")
+        print(f"Connection test to {host}:{port} failed (Note: This is expected if only one connection is allowed): {e}")
         return False
     else:
         return True
@@ -62,8 +62,9 @@ def check_meshtastic_connection(host="localhost", port=4403):
 
 def check_files(config_path):
     """Verify essential application files exist"""
+    # Derive database path relative to config_path directory
     # SQLite uses bulletins.db in current working directory of server.py
-    # Deriving it relative to config_path is more robust than hardcoding
+    # In Docker this is /home/mesh/bbs/
     db_path = os.path.join(os.path.dirname(config_path), "bulletins.db")
     essential_files = [
         config_path,
@@ -141,11 +142,12 @@ def check_heartbeat(max_age=60):
         if age > max_age:
             print(f"Heartbeat file too old: {age:.1f}s (max {max_age}s)")
             return False
-        print(f"Heartbeat file is fresh: {age:.1f}s old")
-        return True
     except OSError as e:
         print(f"Error checking heartbeat file: {e}")
         return False
+    else:
+        print(f"Heartbeat file is fresh: {age:.1f}s old")
+        return True
 
 
 def main():
@@ -162,6 +164,19 @@ def main():
         print("File health checks failed")
         sys.exit(1)
 
+    # 1. Check process health first
+    print("Running process health check...")
+    if not check_process_health():
+        print("Process health check failed")
+        sys.exit(1)
+    
+    # 2. Check heartbeat (Source of Truth for connection health)
+    print("Running heartbeat health check...")
+    if not check_heartbeat():
+        print("Heartbeat health check failed")
+        sys.exit(1)
+
+    # 3. TCP Port check (Soft check - log failures but don't fail healthcheck)
     interface_type = "serial"
     hostname = "localhost"
     tcp_port = 4403
@@ -169,54 +184,14 @@ def main():
     if config and 'interface' in config:
         interface_type = config['interface'].get('type', 'serial').lower()
         hostname = config['interface'].get('hostname', 'localhost')
-        # Try to get port, default to 4403 for TCP
         try:
             tcp_port = config['interface'].getint('port', 4403)
         except ValueError:
             tcp_port = 4403
 
-    print(f"Detected interface: {interface_type}")
-
     if interface_type == "tcp":
-        print(f"Running TCP connection health check to {hostname}:{tcp_port}...")
-        connection_ok = False
-        max_attempts = 3
-        for attempt in range(max_attempts):
-            if check_meshtastic_connection(host=hostname, port=tcp_port):
-                connection_ok = True
-                print(f"Connection test attempt {attempt + 1}: PASS")
-                break
-            else:
-                print(f"Connection test attempt {attempt + 1}: FAIL")
-                if attempt < max_attempts - 1:
-                    time.sleep(1)
-        
-        if not connection_ok:
-            print("All connection attempts failed")
-            sys.exit(1)
-        
-        # Second gate: Ensure process is also healthy
-        print("Running process health check...")
-        if not check_process_health():
-            print("Process health check failed")
-            sys.exit(1)
-        
-        # Third gate: Ensure heartbeat is fresh
-        print("Running heartbeat health check...")
-        if not check_heartbeat():
-            print("Heartbeat health check failed")
-            sys.exit(1)
-    else:
-        print("Skipping TCP check for serial/unknown interface. Running process health check...")
-        if not check_process_health():
-            print("Process health check failed")
-            sys.exit(1)
-        
-        # Also check heartbeat for serial
-        print("Running heartbeat health check...")
-        if not check_heartbeat():
-            print("Heartbeat health check failed")
-            sys.exit(1)
+        print(f"Running soft TCP connection probe to {hostname}:{tcp_port}...")
+        check_meshtastic_connection(host=hostname, port=tcp_port)
 
     print("All health checks passed")
     sys.exit(0)
