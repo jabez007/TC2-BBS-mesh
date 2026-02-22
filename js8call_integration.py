@@ -126,7 +126,7 @@ class JS8CallClient:
                 self.db_conn.execute(f'''
                     INSERT INTO {table} (sender, { 'receiver' if table == 'messages' else 'groupname' }, message)
                     VALUES (?, ?, ?)
-                ''', (sender, receiver_or_group, message))
+                ''', (sender, recipient, message))
         except sqlite3.Error as e:
             self.logger.error(f"Failed to insert message into {table} table: {e}")
 
@@ -160,7 +160,7 @@ class JS8CallClient:
             self.logger.info(f"Received JS8Call message: {sender} to {receiver} - {msg}")
 
             if receiver in self.js8urgent:
-                self.insert_urgent('urgent', sender, receiver, msg)
+                self.insert_message('urgent', sender, receiver, msg)
                 notification_message = f"💥 URGENT JS8Call Message Received 💥\nFrom: {sender}\nCheck BBS for message"
                 send_message(notification_message, BROADCAST_NUM, self.interface)
             elif receiver in self.js8groups:
@@ -171,12 +171,20 @@ class JS8CallClient:
             pass
 
     def send(self, *args, **kwargs):
+        if not self.sock or not self.connected:
+            self.logger.error("JS8Call socket is not connected. Cannot send message.")
+            return
+
         params = kwargs.get('params', {})
         if '_ID' not in params:
             params['_ID'] = '{}'.format(int(time.time() * 1000))
             kwargs['params'] = params
         message = to_message(*args, **kwargs)
-        self.sock.send((message + '\n').encode('utf-8'))  # Convert to bytes
+        try:
+            self.sock.send((message + '\n').encode('utf-8'))  # Convert to bytes
+        except (OSError, BrokenPipeError, ConnectionResetError) as e:
+            self.logger.error(f"Failed to send message to JS8Call: {e}")
+            self.connected = False
 
     def connect(self):
         if not self.server[0] or not self.server[1]:
@@ -191,23 +199,35 @@ class JS8CallClient:
             self.send("STATION.GET_STATUS")
 
             while self.connected:
-                content = self.sock.recv(65500).decode('utf-8')  # Decode received bytes to string
-                if not content:
-                    continue  # Skip empty content
-
                 try:
-                    message = json.loads(content)
-                except ValueError:
-                    continue  # Skip invalid JSON content
+                    content = self.sock.recv(65500).decode('utf-8')  # Decode received bytes to string
+                    if not content:
+                        self.logger.info("JS8Call connection closed by peer.")
+                        break  # Connection closed (EOF)
 
-                if not message:
-                    continue  # Skip empty message
+                    # Handle multiple messages in one recv
+                    for line in content.strip().split('\n'):
+                        if not line:
+                            continue
+                        try:
+                            message = json.loads(line)
+                            if message:
+                                self.process(message)
+                        except ValueError:
+                            self.logger.warning(f"Invalid JSON content received: {line}")
+                            continue
 
-                self.process(message)
+                except (OSError, ConnectionResetError) as e:
+                    self.logger.error(f"Socket error during recv: {e}")
+                    break
         except ConnectionRefusedError:
             self.logger.error(f"Connection to JS8Call server {self.server} refused.")
+        except Exception as e:
+            self.logger.error(f"Unexpected error in JS8Call connection: {e}")
         finally:
-            self.sock.close()
+            self.connected = False
+            if self.sock:
+                self.sock.close()
 
     def close(self):
         self.connected = False

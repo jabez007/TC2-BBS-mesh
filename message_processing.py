@@ -1,6 +1,10 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from meshtastic import BROADCAST_NUM
+
+# Use a thread pool to process messages without blocking the Meshtastic interface thread
+executor = ThreadPoolExecutor(max_workers=5)
 
 from command_handlers import (
     handle_mail_command, handle_bulletin_command, handle_help_command, handle_stats_command, handle_fortune_command,
@@ -177,6 +181,10 @@ def process_message(sender_id, message, interface, is_sync_message=False):
 
 
 def on_receive(packet, interface):
+    # Use thread pool to process each packet asynchronously
+    executor.submit(_process_received_packet, packet, interface)
+
+def _process_received_packet(packet, interface):
     try:
         if 'decoded' in packet and packet['decoded']['portnum'] == 'TEXT_MESSAGE_APP':
             message_bytes = packet['decoded']['payload']
@@ -203,8 +211,8 @@ def on_receive(packet, interface):
                 process_message(sender_id, message_string, interface, is_sync_message=False)
             else:
                 logging.info("Ignoring message sent to group chat or from unknown node")
-    except KeyError as e:
-        logging.error(f"Error processing packet: {e}")
+    except Exception as e:
+        logging.error(f"Error processing packet: {e}", exc_info=True)
 
 def get_recipient_id_by_mail(unique_id):
     # Fix for Mail Delete sync issue

@@ -59,25 +59,62 @@ def main():
 
     merge_config(system_config, args)
 
-    interface = get_interface(system_config)
-    interface.bbs_nodes = system_config['bbs_nodes']
-    interface.allowed_nodes = system_config['allowed_nodes']
-
-    logging.info(f"TC²-BBS is running on {system_config['interface_type']} interface...")
+    logging.info(f"TC²-BBS is starting on {system_config['interface_type']} interface...")
 
     initialize_database()
 
-    def receive_packet(packet, interface):
-        on_receive(packet, interface)
+    js8call_client = None
 
-    pub.subscribe(receive_packet, system_config['mqtt_topic'])
+    while True:
+        interface = None
+        try:
+            interface = get_interface(system_config)
+            interface.bbs_nodes = system_config['bbs_nodes']
+            interface.allowed_nodes = system_config['allowed_nodes']
 
-    # Initialize and start JS8Call Client if configured
-    js8call_client = JS8CallClient(interface)
-    js8call_client.logger = js8call_logger
+            def receive_packet(packet, interface=interface):
+                on_receive(packet, interface)
 
-    if js8call_client.db_conn:
-        js8call_client.connect()
+            pub.subscribe(receive_packet, system_config['mqtt_topic'])
+
+            # Initialize and start JS8Call Client if configured
+            if js8call_client is None:
+                js8call_client = JS8CallClient(interface)
+                js8call_client.logger = js8call_logger
+                if js8call_client.db_conn:
+                    import threading
+                    js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
+                    js8_thread.start()
+            else:
+                # Update interface in existing client if we reconnected
+                js8call_client.interface = interface
+
+            logging.info("Connected to Meshtastic interface.")
+
+            # Main wait loop - monitoring connection if possible
+            while True:
+                # Update heartbeat file for Docker healthcheck
+                try:
+                    with open('/tmp/bbs_heartbeat', 'w') as f:
+                        f.write(str(time.time()))
+                except:
+                    pass
+
+                if hasattr(interface, 'isConnected') and not interface.isConnected():
+                    logging.error("Meshtastic interface disconnected.")
+                    break
+                time.sleep(5)
+
+        except Exception as e:
+            logging.error(f"Error in main loop: {e}. Retrying in 10 seconds...")
+            time.sleep(10)
+        finally:
+            if interface:
+                try:
+                    interface.close()
+                except:
+                    pass
+            pub.unsubAll(system_config['mqtt_topic'])
 
     try:
         while True:
@@ -85,8 +122,9 @@ def main():
 
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")
-        interface.close()
-        if js8call_client.connected:
+        if interface:
+            interface.close()
+        if js8call_client and js8call_client.connected:
             js8call_client.close()
 
 if __name__ == "__main__":

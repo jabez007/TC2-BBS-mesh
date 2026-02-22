@@ -124,6 +124,26 @@ def check_process_health():
         return found
 
 
+def check_heartbeat(max_age=60):
+    """Check if the heartbeat file is recent"""
+    heartbeat_file = '/tmp/bbs_heartbeat'
+    if not os.path.exists(heartbeat_file):
+        print(f"Heartbeat file missing: {heartbeat_file}")
+        return False
+    
+    try:
+        mtime = os.path.getmtime(heartbeat_file)
+        age = time.time() - mtime
+        if age > max_age:
+            print(f"Heartbeat file too old: {age:.1f}s (max {max_age}s)")
+            return False
+        print(f"Heartbeat file is fresh: {age:.1f}s old")
+        return True
+    except OSError as e:
+        print(f"Error checking heartbeat file: {e}")
+        return False
+
+
 # Run health checks
 config, config_path = get_config()
 if not config_path:
@@ -175,10 +195,22 @@ if interface_type == "tcp":
     if not check_process_health():
         print("Process health check failed")
         sys.exit(1)
+    
+    # Third gate: Ensure heartbeat is fresh
+    print("Running heartbeat health check...")
+    if not check_heartbeat():
+        print("Heartbeat health check failed")
+        sys.exit(1)
 else:
     print("Skipping TCP check for serial/unknown interface. Running process health check...")
     if not check_process_health():
         print("Process health check failed")
+        sys.exit(1)
+    
+    # Also check heartbeat for serial
+    print("Running heartbeat health check...")
+    if not check_heartbeat():
+        print("Heartbeat health check failed")
         sys.exit(1)
 
 print("All health checks passed")
