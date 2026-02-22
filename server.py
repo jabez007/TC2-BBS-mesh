@@ -165,13 +165,14 @@ def main():
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")
     finally:
-        # Final shutdown cleanup
+        # Final shutdown cleanup - shutdown executor FIRST to stop in-flight tasks
         shutdown_executor(wait=True)
         
         if js8call_client:
             try:
                 logging.info("Signaling JS8Call client to close...")
-                js8call_client.close()
+                with js8_thread_lock:
+                    js8call_client.close(js8_thread_lock)
             except Exception:
                 logging.exception("Error closing JS8Call client during shutdown")
         

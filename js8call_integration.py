@@ -1,4 +1,4 @@
-from socket import socket, AF_INET, SOCK_STREAM
+from socket import socket, AF_INET, SOCK_STREAM, SHUT_RDWR
 import json
 import time
 import sqlite3
@@ -170,7 +170,7 @@ class JS8CallClient:
         message = to_message(*args, **kwargs)
         try:
             self.sock.send((message + '\n').encode('utf-8'))  # Convert to bytes
-        except (OSError, BrokenPipeError, ConnectionResetError):
+        except OSError:
             self.logger.exception("Failed to send message to JS8Call")
             # We don't take the lock here because it's a transient failure usually handled by connect loop
             self.connected = False
@@ -223,11 +223,11 @@ class JS8CallClient:
                             message = json.loads(line)
                             if message:
                                 self.process(message)
-                        except (ValueError, json.JSONDecodeError) as e:
+                        except ValueError as e:
                             self.logger.warning(f"Invalid JSON content received: {line}. Error: {e}")
                             continue
 
-                except (OSError, ConnectionResetError):
+                except OSError:
                     self.logger.exception("Socket error during recv")
                     break
         except ConnectionRefusedError:
@@ -243,13 +243,24 @@ class JS8CallClient:
                 
             if self.sock:
                 try:
+                    self.sock.shutdown(SHUT_RDWR)
                     self.sock.close()
-                except OSError:
+                except (OSError, AttributeError):
                     pass
 
-    def close(self):
-        # Note: server.py takes lock before calling this or before checking .connected
-        self.connected = False
+    def close(self, lock=None):
+        if lock:
+            with lock:
+                self.connected = False
+        else:
+            self.connected = False
+            
+        if self.sock:
+            try:
+                self.sock.shutdown(SHUT_RDWR)
+                self.sock.close()
+            except (OSError, AttributeError):
+                pass
 
 
 def handle_js8call_command(sender_id, interface):
@@ -333,8 +344,8 @@ def handle_group_message_selection(sender_id, message, step, state, interface):
             send_message(response, sender_id, interface)
         else:
             send_message(f"No messages for group {groupname}.", sender_id, interface)
+        
+        handle_js8call_command(sender_id, interface)
     except (IndexError, ValueError):
         send_message("Invalid group selection. Please choose again.", sender_id, interface)
         handle_group_messages_command(sender_id, interface)
-
-    handle_js8call_command(sender_id, interface)
