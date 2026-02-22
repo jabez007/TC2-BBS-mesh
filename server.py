@@ -16,6 +16,7 @@ import logging
 import time
 import socket
 import threading
+import os
 
 from config_init import initialize_config, get_interface, init_cli_parser, merge_config
 from db_operations import initialize_database
@@ -38,6 +39,8 @@ js8call_handler.setLevel(logging.DEBUG)
 js8call_formatter = logging.Formatter('%(asctime)s - JS8Call - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S')
 js8call_handler.setFormatter(js8call_formatter)
 js8call_logger.addHandler(js8call_handler)
+
+js8_thread_lock = threading.Lock()
 
 def display_banner():
     banner = """
@@ -68,6 +71,10 @@ def main():
     js8call_client = None
     interface = None
     js8_thread = None
+    
+    # Heartbeat path from environment or default to a process-specific one
+    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', f'/tmp/bbs_heartbeat_{os.getpid()}')
+    logging.info(f"Using heartbeat path: {heartbeat_path}")
 
     try:
         while True:
@@ -92,12 +99,13 @@ def main():
                     # Update interface in existing client if we reconnected
                     js8call_client.interface = interface
 
-                # Start/Restart JS8Call connection thread if needed
-                if js8call_client.db_conn and not js8call_client.connected:
-                    if js8_thread is None or not js8_thread.is_alive():
-                        logging.info("Starting JS8Call connection thread...")
-                        js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
-                        js8_thread.start()
+                # Start/Restart JS8Call connection thread if needed (guarded by lock)
+                with js8_thread_lock:
+                    if js8call_client.db_conn and not js8call_client.connected:
+                        if js8_thread is None or not js8_thread.is_alive():
+                            logging.info("Starting JS8Call connection thread...")
+                            js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
+                            js8_thread.start()
 
                 logging.info("Connected to Meshtastic interface.")
 
@@ -105,7 +113,9 @@ def main():
                 while True:
                     # 1. Update heartbeat file ONLY if we are supposedly connected
                     try:
-                        with open('/tmp/bbs_heartbeat', 'w') as f:
+                        # Use atomic-like replacement or secure flags if possible, 
+                        # but keeping it simple for BBS context
+                        with open(heartbeat_path, 'w') as f:
                             f.write(str(time.time()))
                     except OSError as e:
                         logging.debug(f"Heartbeat write failed: {e}")
@@ -115,7 +125,7 @@ def main():
                         try:
                             # getpeername() raises OSError if the socket is no longer connected
                             interface.socket.getpeername()
-                        except (socket.error, OSError):
+                        except OSError:
                             logging.exception("Detected disconnected socket in underlying TCP watchdog.")
                             break
 
@@ -137,10 +147,14 @@ def main():
                 if interface:
                     try:
                         interface.close()
-                    except OSError:
+                    except Exception:
                         logging.exception("Error closing interface in main loop finally")
                     interface = None # Ensure reference is cleared for next iteration or shutdown
-                pub.unsubAll(system_config['mqtt_topic'])
+                
+                try:
+                    pub.unsubAll(system_config['mqtt_topic'])
+                except Exception as e:
+                    logging.debug(f"pub.unsubAll failed: {e}")
 
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")
@@ -154,6 +168,13 @@ def main():
                 js8call_client.close()
             except Exception:
                 logging.exception("Error closing JS8Call client during shutdown")
+        
+        # Cleanup heartbeat file
+        try:
+            if os.path.exists(heartbeat_path):
+                os.remove(heartbeat_path)
+        except OSError:
+            pass
 
 if __name__ == "__main__":
     main()

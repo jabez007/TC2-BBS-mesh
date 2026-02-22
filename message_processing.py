@@ -17,7 +17,11 @@ def shutdown_executor(wait=True, cancel_futures=False):
     global executor
     if executor:
         logging.info(f"Shutting down message processing executor (wait={wait}, cancel_futures={cancel_futures})...")
-        executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        try:
+            # cancel_futures added in Python 3.9
+            executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        except TypeError:
+            executor.shutdown(wait=wait)
         executor = None
         logging.info("Executor shut down.")
 
@@ -203,12 +207,18 @@ def on_receive(packet, interface):
     if executor:
         future = executor.submit(_process_received_packet, packet, interface)
         future.add_done_callback(_log_future_exception)
+    else:
+        logging.warning("Executor unavailable, processing packet synchronously")
+        try:
+            _process_received_packet(packet, interface)
+        except Exception:
+            logging.exception("Synchronous packet processing failed")
 
 def _log_future_exception(future):
     try:
         future.result()
-    except Exception as e:
-        logging.error(f"Background task failed with exception: {e}", exc_info=True)
+    except Exception:
+        logging.exception("Background task failed with exception")
 
 def _process_received_packet(packet, interface):
     try:
@@ -237,8 +247,8 @@ def _process_received_packet(packet, interface):
                 process_message(sender_id, message_string, interface, is_sync_message=False)
             else:
                 logging.info("Ignoring message sent to group chat or from unknown node")
-    except Exception as e:
-        logging.error(f"Error processing packet: {e}", exc_info=True)
+    except Exception:
+        logging.exception("Error processing packet")
 
 def get_recipient_id_by_mail(unique_id):
     # Fix for Mail Delete sync issue with proper resource management

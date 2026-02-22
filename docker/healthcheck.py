@@ -97,6 +97,7 @@ def check_process_health():
             return False
 
         found = False
+        server_pid = None
         for pid in pids:
             try:
                 with open(os.path.join('/proc', pid, 'cmdline'), 'rb') as f:
@@ -108,6 +109,7 @@ def check_process_health():
                             print(f"Found server.py process at PID {pid}")
                             print(f"Process {pid} is responsive (signal 0 passed)")
                             found = True
+                            server_pid = pid
                             break
                         except ProcessLookupError:
                             print(f"PID {pid} exited before check")
@@ -117,28 +119,44 @@ def check_process_health():
                             print(f"Found server.py process at PID {pid}")
                             print(f"Process {pid} exists but permission denied for signaling")
                             found = True
+                            server_pid = pid
                             break
             except OSError:
                 continue
         
         if not found:
             print(f"server.py process not found after scanning {len(pids)} PIDs")
+            return False, None
     except OSError as e:
         print(f"Process check failed during /proc scan: {e}")
-        return False
+        return False, None
     else:
-        return found
+        return found, server_pid
 
 
-def check_heartbeat(max_age=60):
+def check_heartbeat(server_pid, max_age=60):
     """Check if the heartbeat file is recent"""
-    heartbeat_file = '/tmp/bbs_heartbeat'
-    if not os.path.exists(heartbeat_file):
-        print(f"Heartbeat file missing: {heartbeat_file}")
+    # Try custom path from env, or standard process-specific path
+    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH')
+    if not heartbeat_path:
+        if server_pid:
+            heartbeat_path = f'/tmp/bbs_heartbeat_{server_pid}'
+        else:
+            # Fallback to broad scan if PID unknown
+            print("Server PID unknown, looking for any bbs_heartbeat file in /tmp")
+            for f in os.listdir('/tmp'):
+                if f.startswith('bbs_heartbeat_'):
+                    heartbeat_path = os.path.join('/tmp', f)
+                    break
+            if not heartbeat_path:
+                heartbeat_path = '/tmp/bbs_heartbeat' # Original fallback
+
+    if not heartbeat_path or not os.path.exists(heartbeat_path):
+        print(f"Heartbeat file missing: {heartbeat_path}")
         return False
     
     try:
-        mtime = os.path.getmtime(heartbeat_file)
+        mtime = os.path.getmtime(heartbeat_path)
         age = time.time() - mtime
         if age > max_age:
             print(f"Heartbeat file too old: {age:.1f}s (max {max_age}s)")
@@ -167,13 +185,14 @@ def main():
 
     # 1. Check process health first
     print("Running process health check...")
-    if not check_process_health():
+    found, server_pid = check_process_health()
+    if not found:
         print("Process health check failed")
         sys.exit(1)
     
     # 2. Check heartbeat (Source of Truth for connection health)
     print("Running heartbeat health check...")
-    if not check_heartbeat():
+    if not check_heartbeat(server_pid):
         print("Heartbeat health check failed")
         sys.exit(1)
 

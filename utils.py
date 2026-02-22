@@ -34,7 +34,7 @@ def send_message(message, destination, interface):
             logging.exception("CONNECTION ERROR during send. Closing interface to trigger reconnect.")
             try:
                 interface.close()
-            except OSError as close_err:
+            except Exception as close_err:
                 logging.debug(f"Error closing interface: {close_err}")
             return False # Return False to signal connection failure
         except Exception:
@@ -69,7 +69,8 @@ def get_node_short_name(node_id, interface):
 def send_bulletin_to_bbs_nodes(board, sender_short_name, subject, content, unique_id, bbs_nodes, interface):
     message = f"BULLETIN|{board}|{sender_short_name}|{subject}|{content}|{unique_id}"
     for node_id in bbs_nodes:
-        send_message(message, node_id, interface)
+        if not send_message(message, node_id, interface):
+            break
 
 
 def send_mail_to_bbs_nodes(sender_id, sender_short_name, recipient_id, subject, content, unique_id, bbs_nodes,
@@ -77,23 +78,27 @@ def send_mail_to_bbs_nodes(sender_id, sender_short_name, recipient_id, subject, 
     message = f"MAIL|{sender_id}|{sender_short_name}|{recipient_id}|{subject}|{content}|{unique_id}"
     logging.info(f"SERVER SYNC: Syncing new mail message {subject} sent from {sender_short_name} to other BBS systems.")
     for node_id in bbs_nodes:
-        send_message(message, node_id, interface)
+        if not send_message(message, node_id, interface):
+            break
 
 
 def send_delete_bulletin_to_bbs_nodes(bulletin_id, bbs_nodes, interface):
     message = f"DELETE_BULLETIN|{bulletin_id}"
     for node_id in bbs_nodes:
-        send_message(message, node_id, interface)
+        if not send_message(message, node_id, interface):
+            break
 
 
 def send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, interface):
     message = f"DELETE_MAIL|{unique_id}"
     logging.info(f"SERVER SYNC: Sending delete mail sync message with unique_id: {unique_id}")
     for node_id in bbs_nodes:
-        send_message(message, node_id, interface)
+        if not send_message(message, node_id, interface):
+            break
 
 
 def send_channel_to_bbs_nodes(name, url, bbs_nodes, interface):
     message = f"CHANNEL|{name}|{url}"
     for node_id in bbs_nodes:
-        send_message(message, node_id, interface)
+        if not send_message(message, node_id, interface):
+            break
