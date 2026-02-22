@@ -81,11 +81,11 @@ def check_process_health():
         if not found:
             print("server.py process not found")
             return False
-            
-        return True
     except (ProcessLookupError, PermissionError, OSError) as e:
         print(f"Process check failed: {e}")
         return False
+    else:
+        return True
 
 
 # Run health checks
@@ -100,7 +100,7 @@ if config and 'interface' in config:
     # Try to get port, default to 4403 for TCP
     try:
         tcp_port = config['interface'].getint('port', 4403)
-    except (ValueError, configparser.NoOptionError):
+    except ValueError:
         tcp_port = 4403
 
 print(f"Detected interface: {interface_type}")

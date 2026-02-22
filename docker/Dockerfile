@@ -14,14 +14,14 @@ RUN git clone https://github.com/TheCommsChannel/TC2-BBS-mesh.git
 # Stage 2: App stage using python:3.12-alpine to minimize final image
 FROM python:3.12-alpine
 
-# Install healthcheck script (assumes context is the docker/ directory)
-COPY healthcheck.py /usr/local/bin/healthcheck.py
-RUN chmod a+x /usr/local/bin/healthcheck.py
-
 # Install Python dependencies from requirements.txt in the repo (run as root)
 WORKDIR /home/mesh/bbs
 COPY --from=build /TC2-BBS-mesh/requirements.txt ./
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
+
+# Install healthcheck script (assumes context is the docker/ directory)
+COPY healthcheck.py /usr/local/bin/healthcheck.py
+RUN chmod a+x /usr/local/bin/healthcheck.py
 
 # Switch to non-root user with explicit UID 1000
 RUN adduser -D -u 1000 mesh && \
