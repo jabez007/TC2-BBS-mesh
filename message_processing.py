@@ -7,8 +7,9 @@ from meshtastic import BROADCAST_NUM
 executor = ThreadPoolExecutor(max_workers=5)
 
 def shutdown_executor():
-    logging.info("Shutting down message processing executor...")
-    executor.shutdown(wait=False, cancel_futures=True)
+    logging.info("Shutting down message processing executor (graceful)...")
+    executor.shutdown(wait=True)
+    logging.info("Executor shut down.")
 
 from command_handlers import (
     handle_mail_command, handle_bulletin_command, handle_help_command, handle_stats_command, handle_fortune_command,
@@ -226,11 +227,19 @@ def _process_received_packet(packet, interface):
         logging.error(f"Error processing packet: {e}", exc_info=True)
 
 def get_recipient_id_by_mail(unique_id):
-    # Fix for Mail Delete sync issue
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
-    result = c.fetchone()
-    if result:
-        return result[0]
-    return None
+    # Fix for Mail Delete sync issue with proper resource management
+    try:
+        conn = get_db_connection()
+        with conn:
+            c = conn.cursor()
+            try:
+                c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
+                result = c.fetchone()
+                if result:
+                    return result[0]
+                return None
+            finally:
+                c.close()
+    except Exception:
+        logging.exception("Error in get_recipient_id_by_mail")
+        return None

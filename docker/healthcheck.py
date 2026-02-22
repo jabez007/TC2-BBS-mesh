@@ -28,20 +28,17 @@ def get_config():
 
 
 def check_meshtastic_connection(host="localhost", port=4403):
-    """Test if the meshtastic TCP API port is open (safely)"""
+    """Test if the meshtastic TCP API port is open (safely via handshake and peek)"""
     s = None
     try:
         # 1. Test the Handshake
         s = socket.create_connection((host, port), timeout=3)
         
-        # 2. Test the WRITE side to catch BrokenPipeError
-        # Using b"" is safe for Meshtastic framing (0x94 0xC3 ...) but forces a write
-        s.send(b"", socket.MSG_DONTWAIT)
-        
-        # 3. Test the READ side to ensure the remote hasn't hung up
+        # 2. Test the READ side to ensure the remote hasn't hung up
         s.settimeout(1)
         try:
             # Peek to see if the connection is still alive (b"" means EOF/Closed)
+            # This is safe and doesn't break framing
             if s.recv(1, socket.MSG_PEEK) == b"":
                 return False
         except socket.timeout:
@@ -49,10 +46,10 @@ def check_meshtastic_connection(host="localhost", port=4403):
             pass
             
     except OSError as e:
-        print(f"Connection test to {host}:{port} failed (Note: This is expected if only one connection is allowed): {e}")
-        return False
+        # Note: This is expected if the radio only allows a single connection and the BBS is connected
+        return False, str(e)
     else:
-        return True
+        return True, "Handshake successful"
     finally:
         if s:
             try:
@@ -62,23 +59,27 @@ def check_meshtastic_connection(host="localhost", port=4403):
 
 def check_files(config_path):
     """Verify essential application files exist"""
-    # Derive database path relative to config_path directory
     # SQLite uses bulletins.db in current working directory of server.py
-    # In Docker this is /home/mesh/bbs/
-    db_path = os.path.join(os.path.dirname(config_path), "bulletins.db")
-    essential_files = [
-        config_path,
-        db_path
+    # Look in CWD and config dir for bulletins.db to match server resolution
+    db_paths = [
+        "bulletins.db",
+        os.path.join(os.path.dirname(config_path), "bulletins.db")
     ]
-    for f in essential_files:
-        if not f:
-            continue
-        if not os.path.exists(f):
-            print(f"Essential file missing: {f}")
-            return False
-        if not os.access(f, os.R_OK):
-            print(f"File not readable: {f}")
-            return False
+    
+    found_db = False
+    for db_path in db_paths:
+        if os.path.exists(db_path) and os.access(db_path, os.R_OK):
+            found_db = True
+            break
+            
+    if not found_db:
+        print("Essential file missing or not readable: bulletins.db (looked in CWD and config dir)")
+        return False
+
+    if not os.path.exists(config_path) or not os.access(config_path, os.R_OK):
+        print(f"Essential file missing or not readable: {config_path}")
+        return False
+        
     return True
 
 
@@ -176,7 +177,7 @@ def main():
         print("Heartbeat health check failed")
         sys.exit(1)
 
-    # 3. TCP Port check (Soft check - log failures but don't fail healthcheck)
+    # 3. TCP Port check (Soft check - log results but don't fail healthcheck)
     interface_type = "serial"
     hostname = "localhost"
     tcp_port = 4403
@@ -191,7 +192,9 @@ def main():
 
     if interface_type == "tcp":
         print(f"Running soft TCP connection probe to {hostname}:{tcp_port}...")
-        check_meshtastic_connection(host=hostname, port=tcp_port)
+        success, detail = check_meshtastic_connection(host=hostname, port=tcp_port)
+        status = "SUCCESS" if success else "FAILURE"
+        print(f"Soft TCP Probe result: {status} ({detail})")
 
     print("All health checks passed")
     sys.exit(0)

@@ -30,15 +30,15 @@ def send_message(message, destination, interface):
             destid = get_node_id_from_num(destination, interface)
             chunk = chunk.replace('\n', '\\n')
             logging.info(f"Sending message to user '{get_node_short_name(destid, interface)}' ({destid}) with sendID {d.id}: \"{chunk}\"")
-        except (BrokenPipeError, OSError) as e:
-            logging.exception(f"CONNECTION ERROR during send: {e}. Closing interface to trigger reconnect.")
+        except (BrokenPipeError, OSError):
+            logging.exception("CONNECTION ERROR during send. Closing interface to trigger reconnect.")
             try:
                 interface.close()
-            except Exception:
-                pass
+            except Exception as close_err:
+                logging.debug(f"Error closing interface: {close_err}")
             break # Stop trying to send chunks if the pipe is broken
-        except Exception as e:
-            logging.exception(f"REPLY SEND ERROR {e}")
+        except Exception:
+            logging.exception("REPLY SEND ERROR")
 
         
         time.sleep(2)

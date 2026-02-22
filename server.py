@@ -109,10 +109,10 @@ def main():
                     # 2. Aggressive socket watchdog for TCP interfaces
                     if system_config['interface_type'] == 'tcp' and hasattr(interface, 'socket') and interface.socket:
                         try:
-                            # Using b"" is safe for Meshtastic framing but triggers OS-level BrokenPipe check
-                            interface.socket.send(b"", socket.MSG_DONTWAIT)
-                        except (BrokenPipeError, OSError):
-                            logging.error("Detected BrokenPipe in underlying TCP socket watchdog.")
+                            # getpeername() raises OSError if the socket is no longer connected
+                            interface.socket.getpeername()
+                        except (socket.error, OSError):
+                            logging.error("Detected disconnected socket in underlying TCP watchdog.")
                             break
 
                     # 3. Regular interface connectivity check
@@ -122,8 +122,8 @@ def main():
                     
                     time.sleep(5)
 
-            except Exception as e:
-                logging.error(f"Error in main loop: {e}. Retrying in 10 seconds...")
+            except Exception:
+                logging.exception("Error in main loop. Retrying in 10 seconds...")
                 time.sleep(10)
             finally:
                 if interface:
@@ -131,11 +131,13 @@ def main():
                         interface.close()
                     except Exception:
                         logging.exception("Error closing interface in main loop finally")
+                    interface = None # Ensure reference is cleared for next iteration or shutdown
                 pub.unsubAll(system_config['mqtt_topic'])
 
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")
     finally:
+        # Final shutdown cleanup
         if interface:
             try:
                 logging.info("Closing Meshtastic interface...")
