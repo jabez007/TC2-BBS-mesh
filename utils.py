@@ -1,15 +1,19 @@
 import logging
+import threading
 import time
 
 user_states = {}
+user_states_lock = threading.Lock()
 
 
 def update_user_state(user_id, state):
-    user_states[user_id] = state
+    with user_states_lock:
+        user_states[user_id] = state
 
 
 def get_user_state(user_id):
-    return user_states.get(user_id, None)
+    with user_states_lock:
+        return user_states.get(user_id, None)
 
 
 def send_message(message, destination, interface):
@@ -30,11 +34,11 @@ def send_message(message, destination, interface):
             logging.error(f"CONNECTION ERROR during send: {e}. Closing interface to trigger reconnect.")
             try:
                 interface.close()
-            except:
+            except Exception:
                 pass
             break # Stop trying to send chunks if the pipe is broken
         except Exception as e:
-            logging.info(f"REPLY SEND ERROR {e}")
+            logging.error(f"REPLY SEND ERROR {e}")
 
         
         time.sleep(2)

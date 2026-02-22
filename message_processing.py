@@ -182,7 +182,14 @@ def process_message(sender_id, message, interface, is_sync_message=False):
 
 def on_receive(packet, interface):
     # Use thread pool to process each packet asynchronously
-    executor.submit(_process_received_packet, packet, interface)
+    future = executor.submit(_process_received_packet, packet, interface)
+    future.add_done_callback(_log_future_exception)
+
+def _log_future_exception(future):
+    try:
+        future.result()
+    except Exception as e:
+        logging.error(f"Background task failed with exception: {e}", exc_info=True)
 
 def _process_received_packet(packet, interface):
     try:

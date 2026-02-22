@@ -193,6 +193,7 @@ class JS8CallClient:
 
         self.logger.info(f"Connecting to {self.server}")
         self.sock = socket(AF_INET, SOCK_STREAM)
+        self.recv_buffer = ""
         try:
             self.sock.connect(self.server)
             self.connected = True
@@ -205,16 +206,19 @@ class JS8CallClient:
                         self.logger.info("JS8Call connection closed by peer.")
                         break  # Connection closed (EOF)
 
-                    # Handle multiple messages in one recv
-                    for line in content.strip().split('\n'):
+                    self.recv_buffer += content
+                    
+                    while '\n' in self.recv_buffer:
+                        line, self.recv_buffer = self.recv_buffer.split('\n', 1)
+                        line = line.strip()
                         if not line:
                             continue
                         try:
                             message = json.loads(line)
                             if message:
                                 self.process(message)
-                        except ValueError:
-                            self.logger.warning(f"Invalid JSON content received: {line}")
+                        except (ValueError, json.JSONDecodeError) as e:
+                            self.logger.warning(f"Invalid JSON content received: {line}. Error: {e}")
                             continue
 
                 except (OSError, ConnectionResetError) as e:
@@ -227,7 +231,10 @@ class JS8CallClient:
         finally:
             self.connected = False
             if self.sock:
-                self.sock.close()
+                try:
+                    self.sock.close()
+                except Exception:
+                    pass
 
     def close(self):
         self.connected = False
