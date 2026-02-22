@@ -1,5 +1,5 @@
-# From original Dockerfile at https://github.com/TheCommsChannel/TC2-BBS-mesh
-FROM debian:stable-slim AS build
+# Stage 1: Build stage to clone the repo
+FROM debian:12-slim AS build
 
 RUN apt-get update && \
   apt-get install -y \
@@ -11,26 +11,39 @@ RUN git clone https://github.com/TheCommsChannel/TC2-BBS-mesh.git
 
 ####
 
-FROM --platform=$BUILDPLATFORM python:alpine
+# Stage 2: App stage using python:3.12-alpine to minimize final image
+FROM python:3.12-alpine
 
-# Switch to non-root user
-RUN adduser --disabled-password mesh
-USER mesh
-RUN mkdir -p /home/mesh/bbs
+# Install Python dependencies from requirements.txt in the repo (run as root)
 WORKDIR /home/mesh/bbs
-
-# Install Python dependencies
 COPY --from=build /TC2-BBS-mesh/requirements.txt ./
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Copy over app code
-COPY --from=build /TC2-BBS-mesh/*.py ./
+# Install healthcheck script (assumes context is the docker/ directory)
+COPY healthcheck.py /usr/local/bin/healthcheck.py
+RUN chmod a+x /usr/local/bin/healthcheck.py
+
+# Switch to non-root user with explicit UID 1000
+RUN adduser -D -u 1000 mesh && \
+    mkdir -p /home/mesh/bbs/config && \
+    chown -R mesh:mesh /home/mesh/bbs
+USER mesh
+
+# Copy over app code and examples for initialization
+COPY --chown=mesh:mesh --from=build /TC2-BBS-mesh/*.py ./
+COPY --chown=mesh:mesh --from=build /TC2-BBS-mesh/example_config.ini ./
+COPY --chown=mesh:mesh --from=build /TC2-BBS-mesh/examples/ ./examples/
 
 # Define config volume
 VOLUME /home/mesh/bbs/config
-WORKDIR /home/mesh/bbs/config
-COPY --from=build /TC2-BBS-mesh/example_config.ini ./config.ini
-COPY --from=build /TC2-BBS-mesh/fortunes.txt ./
 
-# Define the command to run
-ENTRYPOINT [ "python3", "/home/mesh/bbs/server.py" ]
+# Copy and setup entrypoint script (assumes context is the docker/ directory)
+COPY --chown=mesh:mesh configini.sh /usr/local/bin/entrypoint.sh
+RUN chmod a+x /usr/local/bin/entrypoint.sh
+
+# Add robust healthcheck with increased timeout using exec-form
+HEALTHCHECK --interval=20s --timeout=20s --start-period=40s --retries=2 \
+  CMD ["/usr/local/bin/healthcheck.py"]
+
+# Use the entrypoint script to handle config/database paths
+ENTRYPOINT [ "/usr/local/bin/entrypoint.sh" ]
