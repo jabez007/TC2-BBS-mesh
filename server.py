@@ -103,8 +103,8 @@ def main():
                     try:
                         with open('/tmp/bbs_heartbeat', 'w') as f:
                             f.write(str(time.time()))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logging.debug(f"Heartbeat write failed: {e}")
 
                     # 2. Aggressive socket watchdog for TCP interfaces
                     if system_config['interface_type'] == 'tcp' and hasattr(interface, 'socket') and interface.socket:
@@ -112,7 +112,7 @@ def main():
                             # getpeername() raises OSError if the socket is no longer connected
                             interface.socket.getpeername()
                         except (socket.error, OSError):
-                            logging.error("Detected disconnected socket in underlying TCP watchdog.")
+                            logging.exception("Detected disconnected socket in underlying TCP watchdog.")
                             break
 
                     # 3. Regular interface connectivity check

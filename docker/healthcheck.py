@@ -40,7 +40,7 @@ def check_meshtastic_connection(host="localhost", port=4403):
             # Peek to see if the connection is still alive (b"" means EOF/Closed)
             # This is safe and doesn't break framing
             if s.recv(1, socket.MSG_PEEK) == b"":
-                return False
+                return False, "EOF from remote"
         except socket.timeout:
             # Timeout is GOOD - it means the connection is open but quiet
             pass

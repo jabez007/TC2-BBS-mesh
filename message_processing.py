@@ -212,7 +212,7 @@ def _process_received_packet(packet, interface):
 
             bbs_nodes = interface.bbs_nodes
             is_sync_message = any(message_string.startswith(prefix) for prefix in
-                                  ["BULLETIN|", "MAIL|", "DELETE_BULLETIN|", "DELETE_MAIL|"])
+                                  ["BULLETIN|", "MAIL|", "DELETE_BULLETIN|", "DELETE_MAIL|", "CHANNEL|"])
 
             if sender_node_id in bbs_nodes:
                 if is_sync_message:
