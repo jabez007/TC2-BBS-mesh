@@ -67,6 +67,7 @@ def main():
 
     js8call_client = None
     interface = None
+    js8_thread = None
 
     try:
         while True:
@@ -80,18 +81,18 @@ def main():
 
                 pub.subscribe(receive_packet, system_config['mqtt_topic'])
 
-                # Initialize and start JS8Call Client if configured
+                # Initialize JS8Call Client if configured
                 if js8call_client is None:
                     js8call_client = JS8CallClient(interface)
                     js8call_client.logger = js8call_logger
-                    if js8call_client.db_conn:
-                        js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
-                        js8_thread.start()
                 else:
                     # Update interface in existing client if we reconnected
                     js8call_client.interface = interface
-                    # Restart JS8Call connection if it died
-                    if not js8call_client.connected and js8call_client.db_conn:
+
+                # Start/Restart JS8Call connection thread if needed
+                if js8call_client.db_conn and not js8call_client.connected:
+                    if js8_thread is None or not js8_thread.is_alive():
+                        logging.info("Starting JS8Call connection thread...")
                         js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
                         js8_thread.start()
 
@@ -140,16 +141,9 @@ def main():
         # Final shutdown cleanup - shutdown executor FIRST to stop in-flight tasks
         shutdown_executor()
         
-        if interface:
+        if js8call_client:
             try:
-                logging.info("Closing Meshtastic interface...")
-                interface.close()
-            except Exception:
-                logging.exception("Error closing Meshtastic interface during shutdown")
-        
-        if js8call_client and js8call_client.connected:
-            try:
-                logging.info("Closing JS8Call connection...")
+                logging.info("Signaling JS8Call client to close...")
                 js8call_client.close()
             except Exception:
                 logging.exception("Error closing JS8Call client during shutdown")
