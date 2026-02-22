@@ -125,7 +125,7 @@ def main():
                             # getpeername() raises OSError if the socket is no longer connected
                             interface.socket.getpeername()
                         except OSError:
-                            logging.exception("Detected disconnected socket in underlying TCP watchdog.")
+                            logging.warning("Detected disconnected socket in underlying TCP watchdog.")
                             break
 
                     # 3. Regular interface connectivity check
@@ -139,21 +139,24 @@ def main():
                 logging.exception("Error in main loop. Cleanup then retrying...")
                 should_sleep = True
             finally:
-                # Before closing the interface, stop the message processing executor
-                # so no background tasks try to use the closed interface
+                # 1. Unsubscribe first so no more packets reach on_receive
+                try:
+                    pub.unsubAll(system_config['mqtt_topic'])
+                except Exception as e:
+                    logging.debug(f"pub.unsubAll failed: {e}")
+
+                # 2. Before closing the interface, stop the message processing executor
+                # so no background tasks try to use the closed interface.
+                # wait=True ensures in-flight tasks finish before we close interface.
                 shutdown_executor(wait=True, cancel_futures=True)
 
+                # 3. Finally close the hardware interface
                 if interface:
                     try:
                         interface.close()
                     except Exception:
                         logging.exception("Error closing interface in main loop finally")
                     interface = None # Ensure reference is cleared for next iteration or shutdown
-                
-                try:
-                    pub.unsubAll(system_config['mqtt_topic'])
-                except Exception as e:
-                    logging.debug(f"pub.unsubAll failed: {e}")
                 
                 if should_sleep:
                     logging.info("Waiting 10 seconds before reconnection attempt...")
@@ -162,7 +165,7 @@ def main():
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")
     finally:
-        # Final shutdown cleanup - shutdown executor FIRST to stop in-flight tasks
+        # Final shutdown cleanup
         shutdown_executor(wait=True)
         
         if js8call_client:

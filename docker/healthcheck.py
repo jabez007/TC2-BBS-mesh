@@ -203,15 +203,17 @@ def main():
     # 3. TCP Port check (Soft check - log results but don't fail healthcheck)
     interface_type = "serial"
     hostname = "localhost"
-    tcp_port = 4403
+    tcp_port = 4403 # Meshtastic TCP default
 
     if config and 'interface' in config:
         interface_type = config['interface'].get('type', 'serial').lower()
         hostname = config['interface'].get('hostname', 'localhost')
-        try:
-            tcp_port = config['interface'].getint('port', 4403)
-        except ValueError:
-            tcp_port = 4403
+        
+        if interface_type == 'tcp':
+            try:
+                tcp_port = config['interface'].getint('port', 4403)
+            except ValueError:
+                tcp_port = 4403
 
     if interface_type == "tcp":
         print(f"Running soft TCP connection probe to {hostname}:{tcp_port}...")
