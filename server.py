@@ -137,7 +137,9 @@ def main():
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")
     finally:
-        # Final shutdown cleanup
+        # Final shutdown cleanup - shutdown executor FIRST to stop in-flight tasks
+        shutdown_executor()
+        
         if interface:
             try:
                 logging.info("Closing Meshtastic interface...")
@@ -151,8 +153,6 @@ def main():
                 js8call_client.close()
             except Exception:
                 logging.exception("Error closing JS8Call client during shutdown")
-        
-        shutdown_executor()
 
 if __name__ == "__main__":
     main()

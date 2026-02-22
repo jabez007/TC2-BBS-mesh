@@ -39,6 +39,7 @@ def send_message(message, destination, interface):
             break # Stop trying to send chunks if the pipe is broken
         except Exception:
             logging.exception("REPLY SEND ERROR")
+            break
 
         
         time.sleep(2)
