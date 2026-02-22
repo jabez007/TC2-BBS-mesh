@@ -1,6 +1,33 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 
 from meshtastic import BROADCAST_NUM
+
+# Use a thread pool to process messages without blocking the Meshtastic interface thread
+executor = None
+
+def init_executor():
+    global executor
+    if executor is None:
+        logging.info("Initializing message processing executor...")
+        executor = ThreadPoolExecutor(max_workers=5)
+    return executor
+
+def shutdown_executor(wait=True, cancel_futures=False):
+    global executor
+    if executor:
+        logging.info(f"Shutting down message processing executor (wait={wait}, cancel_futures={cancel_futures})...")
+        try:
+            # cancel_futures added in Python 3.9
+            executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        except TypeError:
+            executor.shutdown(wait=wait)
+        executor = None
+        logging.info("Executor shut down.")
+
+# Initialize at module load
+init_executor()
 
 from command_handlers import (
     handle_mail_command, handle_bulletin_command, handle_help_command, handle_stats_command, handle_fortune_command,
@@ -177,6 +204,33 @@ def process_message(sender_id, message, interface, is_sync_message=False):
 
 
 def on_receive(packet, interface):
+    # Capture global executor locally to avoid TOCTOU races
+    local_executor = executor
+    if local_executor:
+        try:
+            future = local_executor.submit(_process_received_packet, packet, interface)
+            future.add_done_callback(_log_future_exception)
+        except RuntimeError:
+            # Fallback if executor is shutting down
+            logging.warning("Executor shutting down, processing packet synchronously")
+            _process_received_packet_safe(packet, interface)
+    else:
+        logging.warning("Executor unavailable, processing packet synchronously")
+        _process_received_packet_safe(packet, interface)
+
+def _process_received_packet_safe(packet, interface):
+    try:
+        _process_received_packet(packet, interface)
+    except Exception:
+        logging.exception("Synchronous packet processing failed")
+
+def _log_future_exception(future):
+    try:
+        future.result()
+    except Exception:
+        logging.exception("Background task failed with exception")
+
+def _process_received_packet(packet, interface):
     try:
         if 'decoded' in packet and packet['decoded']['portnum'] == 'TEXT_MESSAGE_APP':
             message_bytes = packet['decoded']['payload']
@@ -192,7 +246,7 @@ def on_receive(packet, interface):
 
             bbs_nodes = interface.bbs_nodes
             is_sync_message = any(message_string.startswith(prefix) for prefix in
-                                  ["BULLETIN|", "MAIL|", "DELETE_BULLETIN|", "DELETE_MAIL|"])
+                                  ["BULLETIN|", "MAIL|", "DELETE_BULLETIN|", "DELETE_MAIL|", "CHANNEL|"])
 
             if sender_node_id in bbs_nodes:
                 if is_sync_message:
@@ -203,15 +257,25 @@ def on_receive(packet, interface):
                 process_message(sender_id, message_string, interface, is_sync_message=False)
             else:
                 logging.info("Ignoring message sent to group chat or from unknown node")
-    except KeyError as e:
-        logging.error(f"Error processing packet: {e}")
+    except Exception:
+        logging.exception("Error processing packet")
 
 def get_recipient_id_by_mail(unique_id):
-    # Fix for Mail Delete sync issue
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
-    result = c.fetchone()
-    if result:
-        return result[0]
-    return None
+    # Fix for Mail Delete sync issue with proper resource management
+    # Note: We do NOT wrap the connection in closing() here because get_db_connection()
+    # returns a thread-local cached connection that must remain open for the thread lifecycle.
+    try:
+        conn = get_db_connection()
+        with conn:
+            c = conn.cursor()
+            try:
+                c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
+                result = c.fetchone()
+                if result:
+                    return result[0]
+                return None
+            finally:
+                c.close()
+    except Exception:
+        logging.exception("Error in get_recipient_id_by_mail")
+        return None
