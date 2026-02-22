@@ -4,12 +4,25 @@ from concurrent.futures import ThreadPoolExecutor
 from meshtastic import BROADCAST_NUM
 
 # Use a thread pool to process messages without blocking the Meshtastic interface thread
-executor = ThreadPoolExecutor(max_workers=5)
+executor = None
 
-def shutdown_executor():
-    logging.info("Shutting down message processing executor (graceful)...")
-    executor.shutdown(wait=True)
-    logging.info("Executor shut down.")
+def init_executor():
+    global executor
+    if executor is None:
+        logging.info("Initializing message processing executor...")
+        executor = ThreadPoolExecutor(max_workers=5)
+    return executor
+
+def shutdown_executor(wait=True, cancel_futures=False):
+    global executor
+    if executor:
+        logging.info(f"Shutting down message processing executor (wait={wait}, cancel_futures={cancel_futures})...")
+        executor.shutdown(wait=wait, cancel_futures=cancel_futures)
+        executor = None
+        logging.info("Executor shut down.")
+
+# Initialize at module load
+init_executor()
 
 from command_handlers import (
     handle_mail_command, handle_bulletin_command, handle_help_command, handle_stats_command, handle_fortune_command,
@@ -187,8 +200,9 @@ def process_message(sender_id, message, interface, is_sync_message=False):
 
 def on_receive(packet, interface):
     # Use thread pool to process each packet asynchronously
-    future = executor.submit(_process_received_packet, packet, interface)
-    future.add_done_callback(_log_future_exception)
+    if executor:
+        future = executor.submit(_process_received_packet, packet, interface)
+        future.add_done_callback(_log_future_exception)
 
 def _log_future_exception(future):
     try:

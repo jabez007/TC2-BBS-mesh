@@ -34,15 +34,15 @@ def send_message(message, destination, interface):
             logging.exception("CONNECTION ERROR during send. Closing interface to trigger reconnect.")
             try:
                 interface.close()
-            except Exception as close_err:
+            except OSError as close_err:
                 logging.debug(f"Error closing interface: {close_err}")
-            break # Stop trying to send chunks if the pipe is broken
+            return False # Return False to signal connection failure
         except Exception:
             logging.exception("REPLY SEND ERROR")
-            break
-
+            return False # Return False on any other send error
         
         time.sleep(2)
+    return True
 
 
 def get_node_info(interface, short_name):

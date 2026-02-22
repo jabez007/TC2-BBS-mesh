@@ -20,7 +20,7 @@ import threading
 from config_init import initialize_config, get_interface, init_cli_parser, merge_config
 from db_operations import initialize_database
 from js8call_integration import JS8CallClient
-from message_processing import on_receive, shutdown_executor
+from message_processing import on_receive, shutdown_executor, init_executor
 from pubsub import pub
 
 # General logging
@@ -72,6 +72,9 @@ def main():
     try:
         while True:
             try:
+                # Ensure executor is running for this connection cycle
+                init_executor()
+
                 interface = get_interface(system_config)
                 interface.bbs_nodes = system_config['bbs_nodes']
                 interface.allowed_nodes = system_config['allowed_nodes']
@@ -104,7 +107,7 @@ def main():
                     try:
                         with open('/tmp/bbs_heartbeat', 'w') as f:
                             f.write(str(time.time()))
-                    except Exception as e:
+                    except OSError as e:
                         logging.debug(f"Heartbeat write failed: {e}")
 
                     # 2. Aggressive socket watchdog for TCP interfaces
@@ -127,10 +130,14 @@ def main():
                 logging.exception("Error in main loop. Retrying in 10 seconds...")
                 time.sleep(10)
             finally:
+                # Before closing the interface, stop the message processing executor
+                # so no background tasks try to use the closed interface
+                shutdown_executor(wait=False, cancel_futures=True)
+
                 if interface:
                     try:
                         interface.close()
-                    except Exception:
+                    except OSError:
                         logging.exception("Error closing interface in main loop finally")
                     interface = None # Ensure reference is cleared for next iteration or shutdown
                 pub.unsubAll(system_config['mqtt_topic'])
@@ -139,7 +146,7 @@ def main():
         logging.info("Shutting down the server...")
     finally:
         # Final shutdown cleanup - shutdown executor FIRST to stop in-flight tasks
-        shutdown_executor()
+        shutdown_executor(wait=True)
         
         if js8call_client:
             try:
