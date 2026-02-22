@@ -48,6 +48,7 @@ class JS8CallClient:
         self.sock = None
         self.db_conn = None
         self.interface = interface
+        self.recv_buffer = ""
 
         if self.db_file:
             self.db_conn = sqlite3.connect(self.db_file)
@@ -92,41 +93,28 @@ class JS8CallClient:
     def insert_message(self, table, sender, recipient, message):
         """
         Inserts a message into the specified table in the database.
-
-        This method saves a message along with its sender and receiver or group name into the specified table.
-        If the database connection is not available, it logs an error message.
-
-        Parameters:
-        -----------
-        table : str
-            The name of the table where the message should be inserted. It can be 'messages', 'groups', or 'urgent'.
-        
-        sender : str
-            The meshtastic node identifier of the sender who issued the command
-        
-        recipient : str
-            The identifier of the receiver of the message or the group name.
-        
-        message : str
-            The content of the message.
-
-        Example Usage:
-        --------------
-        client.insert_message('messages', sender='CALLSIGN1', receiver_or_group='CALLSIGN2', message='This is a message.')
-        client.insert_message('groups', sender='CALLSIGN1', receiver_or_group='GroupName', message='This is a group message.')
-        client.insert_message('urgent', sender='CALLSIGN1', receiver_or_group='UrgentGroupName', message='This is an urgent message.')
         """
-
         if not self.db_conn:
             self.logger.error("Database connection is not available.")
             return
 
+        # Table whitelist and mapping for SQL injection prevention
+        allowed_tables = {
+            'messages': ('receiver', 'messages'),
+            'groups': ('groupname', 'groups'),
+            'urgent': ('groupname', 'urgent')
+        }
+
+        if table not in allowed_tables:
+            self.logger.error(f"Attempted access to invalid/unauthorized table: {table}")
+            return
+
+        col_name, real_table = allowed_tables[table]
+        sql = f"INSERT INTO {real_table} (sender, {col_name}, message) VALUES (?, ?, ?)"
+
         try:
             with self.db_conn:
-                self.db_conn.execute(f'''
-                    INSERT INTO {table} (sender, { 'receiver' if table == 'messages' else 'groupname' }, message)
-                    VALUES (?, ?, ?)
-                ''', (sender, recipient, message))
+                self.db_conn.execute(sql, (sender, recipient, message))
         except sqlite3.Error as e:
             self.logger.error(f"Failed to insert message into {table} table: {e}")
 
@@ -184,9 +172,10 @@ class JS8CallClient:
             self.sock.send((message + '\n').encode('utf-8'))  # Convert to bytes
         except (OSError, BrokenPipeError, ConnectionResetError) as e:
             self.logger.error(f"Failed to send message to JS8Call: {e}")
+            # We don't take the lock here because it's a transient failure usually handled by connect loop
             self.connected = False
 
-    def connect(self):
+    def connect(self, lock=None):
         if not self.server[0] or not self.server[1]:
             self.logger.info("JS8Call server configuration not found. Skipping JS8Call connection.")
             return
@@ -196,10 +185,27 @@ class JS8CallClient:
         self.recv_buffer = ""
         try:
             self.sock.connect(self.server)
-            self.connected = True
+            
+            if lock:
+                with lock:
+                    self.connected = True
+            else:
+                self.connected = True
+                
             self.send("STATION.GET_STATUS")
 
-            while self.connected:
+            while True:
+                # Check connected state under lock if possible
+                is_still_connected = False
+                if lock:
+                    with lock:
+                        is_still_connected = self.connected
+                else:
+                    is_still_connected = self.connected
+                
+                if not is_still_connected:
+                    break
+
                 try:
                     content = self.sock.recv(65500).decode('utf-8')  # Decode received bytes to string
                     if not content:
@@ -229,14 +235,20 @@ class JS8CallClient:
         except Exception as e:
             self.logger.error(f"Unexpected error in JS8Call connection: {e}")
         finally:
-            self.connected = False
+            if lock:
+                with lock:
+                    self.connected = False
+            else:
+                self.connected = False
+                
             if self.sock:
                 try:
                     self.sock.close()
-                except Exception:
+                except OSError:
                     pass
 
     def close(self):
+        # Note: server.py takes lock before calling this or before checking .connected
         self.connected = False
 
 

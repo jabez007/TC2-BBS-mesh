@@ -105,7 +105,7 @@ def main():
                     if js8call_client.db_conn and not js8call_client.connected:
                         if js8_thread is None or not js8_thread.is_alive():
                             logging.info("Starting JS8Call connection thread...")
-                            js8_thread = threading.Thread(target=js8call_client.connect, daemon=True)
+                            js8_thread = threading.Thread(target=js8call_client.connect, args=(js8_thread_lock,), daemon=True)
                             js8_thread.start()
 
                 logging.info("Connected to Meshtastic interface.")
