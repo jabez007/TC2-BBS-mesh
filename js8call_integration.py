@@ -170,8 +170,8 @@ class JS8CallClient:
         message = to_message(*args, **kwargs)
         try:
             self.sock.send((message + '\n').encode('utf-8'))  # Convert to bytes
-        except (OSError, BrokenPipeError, ConnectionResetError) as e:
-            self.logger.error(f"Failed to send message to JS8Call: {e}")
+        except (OSError, BrokenPipeError, ConnectionResetError):
+            self.logger.exception("Failed to send message to JS8Call")
             # We don't take the lock here because it's a transient failure usually handled by connect loop
             self.connected = False
 
@@ -227,13 +227,13 @@ class JS8CallClient:
                             self.logger.warning(f"Invalid JSON content received: {line}. Error: {e}")
                             continue
 
-                except (OSError, ConnectionResetError) as e:
-                    self.logger.error(f"Socket error during recv: {e}")
+                except (OSError, ConnectionResetError):
+                    self.logger.exception("Socket error during recv")
                     break
         except ConnectionRefusedError:
-            self.logger.error(f"Connection to JS8Call server {self.server} refused.")
-        except Exception as e:
-            self.logger.error(f"Unexpected error in JS8Call connection: {e}")
+            self.logger.exception(f"Connection to JS8Call server {self.server} refused")
+        except Exception:
+            self.logger.exception("Unexpected error in JS8Call connection")
         finally:
             if lock:
                 with lock:
