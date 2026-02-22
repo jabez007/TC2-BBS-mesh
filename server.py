@@ -78,6 +78,7 @@ def main():
 
     try:
         while True:
+            should_sleep = False
             try:
                 # Ensure executor is running for this connection cycle
                 init_executor()
@@ -113,8 +114,6 @@ def main():
                 while True:
                     # 1. Update heartbeat file ONLY if we are supposedly connected
                     try:
-                        # Use atomic-like replacement or secure flags if possible, 
-                        # but keeping it simple for BBS context
                         with open(heartbeat_path, 'w') as f:
                             f.write(str(time.time()))
                     except OSError as e:
@@ -137,12 +136,12 @@ def main():
                     time.sleep(5)
 
             except Exception:
-                logging.exception("Error in main loop. Retrying in 10 seconds...")
-                time.sleep(10)
+                logging.exception("Error in main loop. Cleanup then retrying...")
+                should_sleep = True
             finally:
                 # Before closing the interface, stop the message processing executor
                 # so no background tasks try to use the closed interface
-                shutdown_executor(wait=False, cancel_futures=True)
+                shutdown_executor(wait=True, cancel_futures=True)
 
                 if interface:
                     try:
@@ -155,6 +154,10 @@ def main():
                     pub.unsubAll(system_config['mqtt_topic'])
                 except Exception as e:
                     logging.debug(f"pub.unsubAll failed: {e}")
+                
+                if should_sleep:
+                    logging.info("Waiting 10 seconds before reconnection attempt...")
+                    time.sleep(10)
 
     except KeyboardInterrupt:
         logging.info("Shutting down the server...")

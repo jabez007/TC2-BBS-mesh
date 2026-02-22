@@ -203,16 +203,25 @@ def process_message(sender_id, message, interface, is_sync_message=False):
 
 
 def on_receive(packet, interface):
-    # Use thread pool to process each packet asynchronously
-    if executor:
-        future = executor.submit(_process_received_packet, packet, interface)
-        future.add_done_callback(_log_future_exception)
+    # Capture global executor locally to avoid TOCTOU races
+    local_executor = executor
+    if local_executor:
+        try:
+            future = local_executor.submit(_process_received_packet, packet, interface)
+            future.add_done_callback(_log_future_exception)
+        except RuntimeError:
+            # Fallback if executor is shutting down
+            logging.warning("Executor shutting down, processing packet synchronously")
+            _process_received_packet_safe(packet, interface)
     else:
         logging.warning("Executor unavailable, processing packet synchronously")
-        try:
-            _process_received_packet(packet, interface)
-        except Exception:
-            logging.exception("Synchronous packet processing failed")
+        _process_received_packet_safe(packet, interface)
+
+def _process_received_packet_safe(packet, interface):
+    try:
+        _process_received_packet(packet, interface)
+    except Exception:
+        logging.exception("Synchronous packet processing failed")
 
 def _log_future_exception(future):
     try:

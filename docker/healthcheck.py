@@ -89,12 +89,12 @@ def check_process_health():
         # Check if main process exists
         if not os.path.exists('/proc'):
             print("Error: /proc filesystem not found. Cannot check process health.")
-            return False
+            return False, None
             
         pids = [pid for pid in os.listdir('/proc') if pid.isdigit()]
         if not pids:
             print("Error: No processes found in /proc.")
-            return False
+            return False, None
 
         found = False
         server_pid = None
@@ -144,10 +144,14 @@ def check_heartbeat(server_pid, max_age=60):
         else:
             # Fallback to broad scan if PID unknown
             print("Server PID unknown, looking for any bbs_heartbeat file in /tmp")
-            for f in os.listdir('/tmp'):
-                if f.startswith('bbs_heartbeat_'):
-                    heartbeat_path = os.path.join('/tmp', f)
-                    break
+            try:
+                for f in os.listdir('/tmp'):
+                    if f.startswith('bbs_heartbeat_'):
+                        heartbeat_path = os.path.join('/tmp', f)
+                        break
+            except OSError as e:
+                print(f"Error listing /tmp: {e}")
+            
             if not heartbeat_path:
                 heartbeat_path = '/tmp/bbs_heartbeat' # Original fallback
 
