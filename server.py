@@ -160,7 +160,7 @@ def main():
                 except TopicNameError as e:
                     logging.debug(f"pub.unsubAll TopicNameError: {e}")
                 except Exception:
-                    logging.debug("pub.unsubAll cleanup")
+                    logging.debug("pub.unsubAll cleanup", exc_info=True)
 
                 # 2. Before closing the interface, stop the message processing executor
                 # so no background tasks try to use the closed interface.
