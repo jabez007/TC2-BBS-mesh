@@ -172,7 +172,8 @@ def main():
             try:
                 logging.info("Signaling JS8Call client to close...")
                 with js8_thread_lock:
-                    js8call_client.close(js8_thread_lock)
+                    # We hold the lock here, so we pass lock=None to close() to avoid deadlock
+                    js8call_client.close(lock=None)
             except Exception:
                 logging.exception("Error closing JS8Call client during shutdown")
         
@@ -180,8 +181,8 @@ def main():
         try:
             if os.path.exists(heartbeat_path):
                 os.remove(heartbeat_path)
-        except OSError:
-            pass
+        except OSError as e:
+            logging.debug(f"Error removing heartbeat file during cleanup: {e}")
 
 if __name__ == "__main__":
     main()
