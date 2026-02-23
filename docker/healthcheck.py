@@ -76,10 +76,6 @@ def check_files(config_path):
     if not found_db:
         print("Essential file missing or not readable: bulletins.db (looked in CWD and config dir)")
         return False
-
-    if not os.path.exists(config_path) or not os.access(config_path, os.R_OK):
-        print(f"Essential file missing or not readable: {config_path}")
-        return False
         
     return True
 
