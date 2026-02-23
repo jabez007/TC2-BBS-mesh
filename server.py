@@ -72,8 +72,16 @@ def main():
     interface = None
     js8_thread = None
     
-    # Heartbeat path from environment or default to a process-specific one
-    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', f'/tmp/bbs_heartbeat_{os.getpid()}')
+    # Heartbeat path from environment or default to an app-specific runtime directory
+    # Avoiding plain /tmp to address Ruff S108
+    runtime_dir = os.path.join(os.getcwd(), "run")
+    try:
+        os.makedirs(runtime_dir, exist_ok=True)
+    except OSError:
+        # Fallback if we can't create 'run' in CWD
+        runtime_dir = "/tmp"
+        
+    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, f'bbs_heartbeat_{os.getpid()}'))
     logging.info(f"Using heartbeat path: {heartbeat_path}")
 
     try:

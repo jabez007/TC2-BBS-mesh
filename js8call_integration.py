@@ -12,6 +12,14 @@ from utils import send_message, update_user_state
 
 config_file = 'config.ini'
 
+def _load_js8_db_path():
+    """Load JS8Call DB path once at module load"""
+    config = configparser.ConfigParser()
+    config.read(config_file)
+    return config.get('js8call', 'db_file', fallback='js8call.db')
+
+JS8_DB_PATH = _load_js8_db_path()
+
 def from_message(content):
     try:
         return json.loads(content)
@@ -37,7 +45,7 @@ class JS8CallClient:
             self.config.get('js8call', 'host', fallback=None),
             self.config.getint('js8call', 'port', fallback=None)
         )
-        self.db_file = self.config.get('js8call', 'db_file', fallback='js8call.db')
+        self.db_file = JS8_DB_PATH
         self.js8groups = self.config.get('js8call', 'js8groups', fallback='').split(',')
         self.store_messages = self.config.getboolean('js8call', 'store_messages', fallback=True)
         self.js8urgent = self.config.get('js8call', 'js8urgent', fallback='').split(',')
@@ -98,19 +106,18 @@ class JS8CallClient:
             self.logger.error("Database connection is not available.")
             return
 
-        # Table whitelist and mapping for SQL injection prevention
-        allowed_tables = {
-            'messages': ('receiver', 'messages'),
-            'groups': ('groupname', 'groups'),
-            'urgent': ('groupname', 'urgent')
+        # Prebuilt queries map to prevent SQL injection (Ruff S608)
+        prebuilt_queries = {
+            'messages': "INSERT INTO messages (sender, receiver, message) VALUES (?, ?, ?)",
+            'groups': "INSERT INTO groups (sender, groupname, message) VALUES (?, ?, ?)",
+            'urgent': "INSERT INTO urgent (sender, groupname, message) VALUES (?, ?, ?)"
         }
 
-        if table not in allowed_tables:
+        if table not in prebuilt_queries:
             self.logger.error(f"Attempted access to invalid/unauthorized table: {table}")
             return
 
-        col_name, real_table = allowed_tables[table]
-        sql = f"INSERT INTO {real_table} (sender, {col_name}, message) VALUES (?, ?, ?)"
+        sql = prebuilt_queries[table]
 
         try:
             with self.db_conn:
@@ -288,15 +295,8 @@ def handle_js8call_steps(sender_id, message, step, interface, state):
             handle_js8call_command(sender_id, interface)
 
 
-def _get_js8_db_path():
-    """Helper to get JS8Call DB path from config"""
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    return config.get('js8call', 'db_file', fallback='js8call.db')
-
 def handle_group_messages_command(sender_id, interface):
-    db_path = _get_js8_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(JS8_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT DISTINCT groupname FROM groups")
         groups = c.fetchall()
@@ -309,8 +309,7 @@ def handle_group_messages_command(sender_id, interface):
             handle_js8call_command(sender_id, interface)
 
 def handle_station_messages_command(sender_id, interface):
-    db_path = _get_js8_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(JS8_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT sender, receiver, message, timestamp FROM messages")
         messages = c.fetchall()
@@ -322,8 +321,7 @@ def handle_station_messages_command(sender_id, interface):
         handle_js8call_command(sender_id, interface)
 
 def handle_urgent_messages_command(sender_id, interface):
-    db_path = _get_js8_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with sqlite3.connect(JS8_DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT sender, groupname, message, timestamp FROM urgent")
         messages = c.fetchall()
@@ -334,14 +332,13 @@ def handle_urgent_messages_command(sender_id, interface):
             send_message("No urgent messages available.", sender_id, interface)
         handle_js8call_command(sender_id, interface)
 
-def handle_group_message_selection(sender_id, message, step, state, interface):
+def handle_group_message_selection(sender_id, message, _step, state, interface):
     groups = state['groups']
     try:
         group_index = int(message)
         groupname = groups[group_index][0]
 
-        db_path = _get_js8_db_path()
-        with sqlite3.connect(db_path) as conn:
+        with sqlite3.connect(JS8_DB_PATH) as conn:
             c = conn.cursor()
             c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=?", (groupname,))
             messages = c.fetchall()
