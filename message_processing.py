@@ -1,5 +1,6 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 
 from meshtastic import BROADCAST_NUM
 
@@ -262,17 +263,18 @@ def _process_received_packet(packet, interface):
 def get_recipient_id_by_mail(unique_id):
     # Fix for Mail Delete sync issue with proper resource management
     try:
-        conn = get_db_connection()
-        with conn:
-            c = conn.cursor()
-            try:
-                c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
-                result = c.fetchone()
-                if result:
-                    return result[0]
-                return None
-            finally:
-                c.close()
+        # Use context manager to ensure connection is closed
+        with closing(get_db_connection()) as conn:
+            with conn:
+                c = conn.cursor()
+                try:
+                    c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
+                    result = c.fetchone()
+                    if result:
+                        return result[0]
+                    return None
+                finally:
+                    c.close()
     except Exception:
         logging.exception("Error in get_recipient_id_by_mail")
         return None

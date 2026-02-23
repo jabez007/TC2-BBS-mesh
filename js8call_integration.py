@@ -5,6 +5,7 @@ import sqlite3
 import configparser
 import logging
 import os
+from contextlib import closing
 
 from meshtastic import BROADCAST_NUM
 
@@ -317,7 +318,7 @@ def handle_js8call_steps(sender_id, message, step, interface, state):
 def handle_group_messages_command(sender_id, interface):
     groups = []
     db_path = get_js8_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         c = conn.cursor()
         c.execute("SELECT DISTINCT groupname FROM groups")
         groups = c.fetchall()
@@ -333,7 +334,7 @@ def handle_group_messages_command(sender_id, interface):
 def handle_station_messages_command(sender_id, interface):
     messages = []
     db_path = get_js8_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         c = conn.cursor()
         c.execute("SELECT sender, receiver, message, timestamp FROM messages")
         messages = c.fetchall()
@@ -348,7 +349,7 @@ def handle_station_messages_command(sender_id, interface):
 def handle_urgent_messages_command(sender_id, interface):
     messages = []
     db_path = get_js8_db_path()
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn:
         c = conn.cursor()
         c.execute("SELECT sender, groupname, message, timestamp FROM urgent")
         messages = c.fetchall()
@@ -371,7 +372,7 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
         groupname = groups[group_index][0]
         messages = []
         db_path = get_js8_db_path()
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             c = conn.cursor()
             c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=?", (groupname,))
             messages = c.fetchall()

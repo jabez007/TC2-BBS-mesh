@@ -157,7 +157,7 @@ def main():
                 # 1. Unsubscribe first so no more packets reach on_receive
                 try:
                     pub.unsubAll(system_config['mqtt_topic'])
-                except (TopicNameError, Exception) as e:
+                except Exception as e:
                     logging.debug(f"pub.unsubAll cleanup: {e}")
 
                 # 2. Before closing the interface, stop the message processing executor
