@@ -258,6 +258,7 @@ class JS8CallClient:
                     self.sock.close()
                 except (OSError, AttributeError):
                     pass
+                self.sock = None
 
     def close(self, lock=None):
         self._set_connected(False, lock)
@@ -267,12 +268,13 @@ class JS8CallClient:
                 self.sock.close()
             except (OSError, AttributeError):
                 pass
+            self.sock = None
         
         if self.db_conn:
             try:
                 self.db_conn.close()
             except Exception:
-                pass
+                self.logger.exception("Failed to close db_conn")
             self.db_conn = None
 
 

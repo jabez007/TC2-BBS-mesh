@@ -28,7 +28,8 @@ try:
     from pubsub.core.topicmgr import TopicNameError
 except ImportError:
     # Fallback for different pypubsub versions
-    class TopicNameError(Exception): pass
+    class TopicNameError(Exception):
+        pass
 
 # General logging
 logging.basicConfig(
@@ -79,6 +80,7 @@ def main():
     js8_thread = None
     
     # Heartbeat path from environment or default to an app-specific runtime directory
+    # Avoiding plain /tmp to address Ruff S108
     runtime_dir = os.path.join(os.getcwd(), "run")
     try:
         os.makedirs(runtime_dir, exist_ok=True)
@@ -155,7 +157,7 @@ def main():
                 # 1. Unsubscribe first so no more packets reach on_receive
                 try:
                     pub.unsubAll(system_config['mqtt_topic'])
-                except (TopicNameError, Exception) as e:
+                except Exception as e:
                     logging.debug(f"pub.unsubAll cleanup: {e}")
 
                 # 2. Before closing the interface, stop the message processing executor
@@ -192,10 +194,10 @@ def main():
         
         # Cleanup heartbeat file
         try:
-            # Atomic-ish removal without TOCTOU race
-            os.remove(heartbeat_path)
-        except (FileNotFoundError, OSError) as e:
-            logging.debug(f"Note: Heartbeat file cleanup: {e}")
+            if os.path.exists(heartbeat_path):
+                os.remove(heartbeat_path)
+        except OSError as e:
+            logging.debug(f"Error removing heartbeat file during cleanup: {e}")
 
 if __name__ == "__main__":
     main()

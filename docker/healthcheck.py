@@ -4,6 +4,7 @@ import socket
 import sys
 import time
 import configparser
+import tempfile
 
 
 def get_config():
@@ -140,8 +141,8 @@ def check_heartbeat(server_pid, max_age=60):
     heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH')
     
     if not heartbeat_path:
-        # Match server.py's priority: ./run/ then /tmp/
-        search_dirs = [os.path.join(os.getcwd(), "run"), "/tmp"]
+        # Match server.py's priority: ./run/ then tempfile.gettempdir()
+        search_dirs = [os.path.join(os.getcwd(), "run"), tempfile.gettempdir()]
         
         found_path = None
         for d in search_dirs:
@@ -169,7 +170,7 @@ def check_heartbeat(server_pid, max_age=60):
         heartbeat_path = found_path
 
     if not heartbeat_path or not os.path.exists(heartbeat_path):
-        print(f"Heartbeat file missing (searched ./run/ and /tmp/): {heartbeat_path}")
+        print(f"Heartbeat file missing (searched ./run/ and {tempfile.gettempdir()}): {heartbeat_path}")
         return False
     
     try:
