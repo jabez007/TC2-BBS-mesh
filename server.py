@@ -157,6 +157,8 @@ def main():
                 # 1. Unsubscribe first so no more packets reach on_receive
                 try:
                     pub.unsubAll(system_config['mqtt_topic'])
+                except TopicNameError as e:
+                    logging.debug(f"pub.unsubAll TopicNameError: {e}")
                 except Exception as e:
                     logging.debug(f"pub.unsubAll cleanup: {e}")
 

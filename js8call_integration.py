@@ -365,13 +365,21 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
     groups = state['groups']
     try:
         group_index = int(message)
-        # Explicit bounds check to prevent negative index issues and crashes
-        if not (0 <= group_index < len(groups)):
-            raise ValueError("Index out of bounds")
+    except ValueError:
+        send_message("Invalid input. Please enter a valid group number.", sender_id, interface)
+        handle_group_messages_command(sender_id, interface)
+        return
+
+    # Explicit bounds check to prevent negative index issues and crashes
+    if not (0 <= group_index < len(groups)):
+        send_message("Invalid group selection. Please choose again.", sender_id, interface)
+        handle_group_messages_command(sender_id, interface)
+        return
             
-        groupname = groups[group_index][0]
-        messages = []
-        db_path = get_js8_db_path()
+    groupname = groups[group_index][0]
+    messages = []
+    db_path = get_js8_db_path()
+    try:
         with closing(sqlite3.connect(db_path)) as conn:
             c = conn.cursor()
             c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=?", (groupname,))
@@ -384,6 +392,7 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
             send_message(f"No messages for group {groupname}.", sender_id, interface)
         
         handle_js8call_command(sender_id, interface)
-    except ValueError:
-        send_message("Invalid group selection. Please choose again.", sender_id, interface)
+    except Exception:
+        logging.exception("Error fetching group messages")
+        send_message("An error occurred while fetching messages.", sender_id, interface)
         handle_group_messages_command(sender_id, interface)
