@@ -27,6 +27,9 @@ def get_js8_db_path(config_path=None):
     except (configparser.Error, OSError):
         return 'js8call.db'
 
+# Cache DB path once at module load
+JS8_DB_PATH = get_js8_db_path()
+
 def to_message(*args, **kwargs):
     """
     Helper to create a JS8Call message dictionary.
@@ -51,7 +54,7 @@ class JS8CallClient:
             self.config.get('js8call', 'host', fallback=None),
             self.config.getint('js8call', 'port', fallback=None)
         )
-        self.db_file = get_js8_db_path()
+        self.db_file = JS8_DB_PATH
         self.js8groups = self.config.get('js8call', 'js8groups', fallback='').split(',')
         self.store_messages = self.config.getboolean('js8call', 'store_messages', fallback=True)
         self.js8urgent = self.config.get('js8call', 'js8urgent', fallback='').split(',')
@@ -214,18 +217,9 @@ class JS8CallClient:
             self._set_connected(True, lock)
             self.send("STATION.GET_STATUS")
 
-            while True:
-                # Check connected state under lock if possible
-                is_still_connected = False
-                if lock:
-                    with lock:
-                        is_still_connected = self.connected
-                else:
-                    is_still_connected = self.connected
-                
-                if not is_still_connected:
-                    break
-
+            while self.connected:
+                # Loop condition self.connected is checked here. 
+                # Teardown logic in finally will set self.connected = False under lock.
                 try:
                     data = self.sock.recv(65500)
                     if not data:
@@ -254,7 +248,8 @@ class JS8CallClient:
                             continue
 
                 except OSError:
-                    self.logger.exception("Socket error during recv")
+                    if self.connected: # Only log if we didn't expect the closure
+                        self.logger.exception("Socket error during recv")
                     break
         except ConnectionRefusedError:
             self.logger.exception(f"Connection to JS8Call server {self.server} refused")
@@ -317,8 +312,7 @@ def handle_js8call_steps(sender_id, message, step, interface, state):
 
 def handle_group_messages_command(sender_id, interface):
     groups = []
-    db_path = get_js8_db_path()
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(sqlite3.connect(JS8_DB_PATH)) as conn:
         c = conn.cursor()
         c.execute("SELECT DISTINCT groupname FROM groups")
         groups = c.fetchall()
@@ -333,8 +327,7 @@ def handle_group_messages_command(sender_id, interface):
 
 def handle_station_messages_command(sender_id, interface):
     messages = []
-    db_path = get_js8_db_path()
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(sqlite3.connect(JS8_DB_PATH)) as conn:
         c = conn.cursor()
         c.execute("SELECT sender, receiver, message, timestamp FROM messages")
         messages = c.fetchall()
@@ -348,8 +341,7 @@ def handle_station_messages_command(sender_id, interface):
 
 def handle_urgent_messages_command(sender_id, interface):
     messages = []
-    db_path = get_js8_db_path()
-    with closing(sqlite3.connect(db_path)) as conn:
+    with closing(sqlite3.connect(JS8_DB_PATH)) as conn:
         c = conn.cursor()
         c.execute("SELECT sender, groupname, message, timestamp FROM urgent")
         messages = c.fetchall()
@@ -365,22 +357,13 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
     groups = state['groups']
     try:
         group_index = int(message)
-    except ValueError:
-        send_message("Invalid input. Please enter a valid group number.", sender_id, interface)
-        handle_group_messages_command(sender_id, interface)
-        return
-
-    # Explicit bounds check to prevent negative index issues and crashes
-    if not (0 <= group_index < len(groups)):
-        send_message("Invalid group selection. Please choose again.", sender_id, interface)
-        handle_group_messages_command(sender_id, interface)
-        return
+        # Explicit bounds check to prevent negative index issues and crashes
+        if not (0 <= group_index < len(groups)):
+            raise ValueError("Index out of bounds")
             
-    groupname = groups[group_index][0]
-    messages = []
-    db_path = get_js8_db_path()
-    try:
-        with closing(sqlite3.connect(db_path)) as conn:
+        groupname = groups[group_index][0]
+        messages = []
+        with closing(sqlite3.connect(JS8_DB_PATH)) as conn:
             c = conn.cursor()
             c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=?", (groupname,))
             messages = c.fetchall()
@@ -392,7 +375,6 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
             send_message(f"No messages for group {groupname}.", sender_id, interface)
         
         handle_js8call_command(sender_id, interface)
-    except Exception:
-        logging.exception("Error fetching group messages")
-        send_message("An error occurred while fetching messages.", sender_id, interface)
+    except ValueError:
+        send_message("Invalid group selection. Please choose again.", sender_id, interface)
         handle_group_messages_command(sender_id, interface)

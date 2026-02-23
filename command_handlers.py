@@ -169,14 +169,17 @@ def handle_bb_steps(sender_id, message, step, state, interface, bbs_nodes):
             return
         try:
             board_index = int(message)
-            if board_index not in boards:
-                raise ValueError
-            board_name = boards[board_index]
-        except (ValueError, KeyError):
+        except ValueError:
+            send_message("Invalid input. Please enter a valid board number.", sender_id, interface)
+            handle_bulletin_command(sender_id, interface)
+            return
+
+        if board_index not in boards:
             send_message("Invalid board selection. Please choose a valid number.", sender_id, interface)
             handle_bulletin_command(sender_id, interface)
             return
             
+        board_name = boards[board_index]
         bulletins = get_bulletins(board_name)
         response = f"{board_name} has {len(bulletins)} messages.\n[R]ead  [P]ost"
         send_message(response, sender_id, interface)

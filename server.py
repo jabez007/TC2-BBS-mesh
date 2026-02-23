@@ -159,8 +159,8 @@ def main():
                     pub.unsubAll(system_config['mqtt_topic'])
                 except TopicNameError as e:
                     logging.debug(f"pub.unsubAll TopicNameError: {e}")
-                except Exception as e:
-                    logging.debug(f"pub.unsubAll cleanup: {e}")
+                except Exception:
+                    logging.debug("pub.unsubAll cleanup")
 
                 # 2. Before closing the interface, stop the message processing executor
                 # so no background tasks try to use the closed interface.
