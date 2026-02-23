@@ -30,14 +30,12 @@ def get_js8_db_path(config_path=None):
 # Cache DB path once at module load
 JS8_DB_PATH = get_js8_db_path()
 
-def to_message(*args, **kwargs):
+def to_message(typ, value='', params=None):
     """
     Helper to create a JS8Call message dictionary.
-    Signature: to_message(typ, value='', params=None)
     """
-    typ = args[0] if len(args) > 0 else kwargs.get('typ', '')
-    value = args[1] if len(args) > 1 else kwargs.get('value', '')
-    params = args[2] if len(args) > 2 else kwargs.get('params', {})
+    if params is None:
+        params = {}
     return {'type': typ, 'value': value, 'params': params}
 
 
@@ -69,7 +67,7 @@ class JS8CallClient:
 
         if self.config.has_section('js8call'):
             # check_same_thread=False allows background thread to use the connection
-            self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False)
+            self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False, timeout=30)
             self.create_tables()
         else:
             self.logger.info("JS8Call configuration not found. Skipping JS8Call integration.")
@@ -183,18 +181,18 @@ class JS8CallClient:
         else:
             self.connected = value
 
-    def send(self, *args, **kwargs):
+    def send(self, typ, value='', params=None):
         if not self.sock or not self.connected:
             self.logger.error("JS8Call socket is not connected. Cannot send message.")
             return
 
-        params = kwargs.get('params', {})
-        if '_ID' not in params:
-            params['_ID'] = '{}'.format(int(time.time() * 1000))
-            kwargs['params'] = params
+        # Defensive copy to avoid mutating caller's dict
+        params_copy = dict(params) if params is not None else {}
         
-        # Helper returns a dict, serialize it to JSON here
-        message_dict = to_message(*args, **kwargs)
+        if '_ID' not in params_copy:
+            params_copy['_ID'] = '{}'.format(int(time.time() * 1000))
+        
+        message_dict = to_message(typ, value, params_copy)
         message = json.dumps(message_dict)
         
         try:

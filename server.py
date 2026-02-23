@@ -141,11 +141,15 @@ def main():
                             interface.socket.getpeername()
                         except OSError:
                             logging.warning("Detected disconnected socket in underlying TCP watchdog.")
+                            # Short back-off before retry loop cleanup
+                            time.sleep(2)
                             break
 
                     # 3. Regular interface connectivity check
                     if hasattr(interface, 'isConnected') and not interface.isConnected():
                         logging.error("Meshtastic interface disconnected.")
+                        # Short back-off before retry loop cleanup
+                        time.sleep(2)
                         break
                     
                     time.sleep(5)
