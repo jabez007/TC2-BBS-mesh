@@ -194,8 +194,9 @@ def main():
         
         # Cleanup heartbeat file
         try:
-            if os.path.exists(heartbeat_path):
-                os.remove(heartbeat_path)
+            os.remove(heartbeat_path)
+        except FileNotFoundError:
+            pass
         except OSError as e:
             logging.debug(f"Error removing heartbeat file during cleanup: {e}")
 
