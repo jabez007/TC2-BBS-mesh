@@ -134,7 +134,8 @@ def check_process_health():
 def check_heartbeat(server_pid, max_age=60):
     """Check if the heartbeat file is recent"""
     # Try custom path from env
-    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH')
+    env_heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH')
+    heartbeat_path = env_heartbeat_path
     
     if not heartbeat_path:
         # Match server.py's priority: ./run/ then tempfile.gettempdir()
@@ -166,7 +167,10 @@ def check_heartbeat(server_pid, max_age=60):
         heartbeat_path = found_path
 
     if not heartbeat_path or not os.path.exists(heartbeat_path):
-        print(f"Heartbeat file missing (searched ./run/ and {tempfile.gettempdir()}): {heartbeat_path}")
+        if env_heartbeat_path:
+            print(f"Heartbeat file missing at BBS_HEARTBEAT_PATH: {env_heartbeat_path}")
+        else:
+            print(f"Heartbeat file missing (searched ./run/ and {tempfile.gettempdir()})")
         return False
     
     try:

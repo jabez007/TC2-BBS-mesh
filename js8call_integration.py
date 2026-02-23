@@ -26,6 +26,16 @@ def get_js8_db_path(config_path=None):
     except (configparser.Error, OSError):
         return 'js8call.db'
 
+def to_message(*args, **kwargs):
+    """
+    Helper to create a JS8Call message dictionary.
+    Signature: to_message(typ, value='', params=None)
+    """
+    typ = args[0] if len(args) > 0 else kwargs.get('typ', '')
+    value = args[1] if len(args) > 1 else kwargs.get('value', '')
+    params = args[2] if len(args) > 2 else kwargs.get('params', {})
+    return {'type': typ, 'value': value, 'params': params}
+
 
 class JS8CallClient:
     def __init__(self, interface, logger=None):
@@ -178,7 +188,11 @@ class JS8CallClient:
         if '_ID' not in params:
             params['_ID'] = '{}'.format(int(time.time() * 1000))
             kwargs['params'] = params
-        message = to_message(*args, **kwargs)
+        
+        # Helper returns a dict, serialize it to JSON here
+        message_dict = to_message(*args, **kwargs)
+        message = json.dumps(message_dict)
+        
         try:
             self.sock.send((message + '\n').encode('utf-8'))  # Convert to bytes
         except OSError:
@@ -369,6 +383,6 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
             send_message(f"No messages for group {groupname}.", sender_id, interface)
         
         handle_js8call_command(sender_id, interface)
-    except (IndexError, ValueError):
+    except ValueError:
         send_message("Invalid group selection. Please choose again.", sender_id, interface)
         handle_group_messages_command(sender_id, interface)
