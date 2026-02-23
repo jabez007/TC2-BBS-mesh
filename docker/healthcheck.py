@@ -54,7 +54,7 @@ def check_meshtastic_connection(host="localhost", port=4403):
         if s:
             try:
                 s.close()
-            except Exception:
+            except OSError:
                 pass
 
 def check_files(config_path):
@@ -136,27 +136,40 @@ def check_process_health():
 
 def check_heartbeat(server_pid, max_age=60):
     """Check if the heartbeat file is recent"""
-    # Try custom path from env, or standard process-specific path
+    # Try custom path from env
     heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH')
+    
     if not heartbeat_path:
-        if server_pid:
-            heartbeat_path = f'/tmp/bbs_heartbeat_{server_pid}'
-        else:
-            # Fallback to broad scan if PID unknown
-            print("Server PID unknown, looking for any bbs_heartbeat file in /tmp")
-            try:
-                for f in os.listdir('/tmp'):
-                    if f.startswith('bbs_heartbeat_'):
-                        heartbeat_path = os.path.join('/tmp', f)
-                        break
-            except OSError as e:
-                print(f"Error listing /tmp: {e}")
+        # Match server.py's priority: ./run/ then /tmp/
+        search_dirs = [os.path.join(os.getcwd(), "run"), "/tmp"]
+        
+        found_path = None
+        for d in search_dirs:
+            if not os.path.exists(d):
+                continue
+                
+            if server_pid:
+                test_path = os.path.join(d, f'bbs_heartbeat_{server_pid}')
+                if os.path.exists(test_path):
+                    found_path = test_path
+                    break
             
-            if not heartbeat_path:
-                heartbeat_path = '/tmp/bbs_heartbeat' # Original fallback
+            # If PID specific file not found or server_pid is None, look for any matching file in this dir
+            try:
+                for f in os.listdir(d):
+                    if f.startswith('bbs_heartbeat_'):
+                        found_path = os.path.join(d, f)
+                        break
+            except OSError:
+                continue
+                
+            if found_path:
+                break
+        
+        heartbeat_path = found_path
 
     if not heartbeat_path or not os.path.exists(heartbeat_path):
-        print(f"Heartbeat file missing: {heartbeat_path}")
+        print(f"Heartbeat file missing (searched ./run/ and /tmp/): {heartbeat_path}")
         return False
     
     try:

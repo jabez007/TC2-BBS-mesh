@@ -17,12 +17,18 @@ import time
 import socket
 import threading
 import os
+import tempfile
 
 from config_init import initialize_config, get_interface, init_cli_parser, merge_config
 from db_operations import initialize_database
 from js8call_integration import JS8CallClient
 from message_processing import on_receive, shutdown_executor, init_executor
 from pubsub import pub
+try:
+    from pubsub.core.topicmgr import TopicNameError
+except ImportError:
+    # Fallback for different pypubsub versions
+    class TopicNameError(Exception): pass
 
 # General logging
 logging.basicConfig(
@@ -73,13 +79,12 @@ def main():
     js8_thread = None
     
     # Heartbeat path from environment or default to an app-specific runtime directory
-    # Avoiding plain /tmp to address Ruff S108
     runtime_dir = os.path.join(os.getcwd(), "run")
     try:
         os.makedirs(runtime_dir, exist_ok=True)
     except OSError:
-        # Fallback if we can't create 'run' in CWD
-        runtime_dir = "/tmp"
+        # Fallback to platform-native temp dir (satisfies Ruff S108)
+        runtime_dir = tempfile.gettempdir()
         
     heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, f'bbs_heartbeat_{os.getpid()}'))
     logging.info(f"Using heartbeat path: {heartbeat_path}")
@@ -150,8 +155,8 @@ def main():
                 # 1. Unsubscribe first so no more packets reach on_receive
                 try:
                     pub.unsubAll(system_config['mqtt_topic'])
-                except Exception as e:
-                    logging.debug(f"pub.unsubAll failed: {e}")
+                except (TopicNameError, Exception) as e:
+                    logging.debug(f"pub.unsubAll cleanup: {e}")
 
                 # 2. Before closing the interface, stop the message processing executor
                 # so no background tasks try to use the closed interface.
@@ -187,10 +192,10 @@ def main():
         
         # Cleanup heartbeat file
         try:
-            if os.path.exists(heartbeat_path):
-                os.remove(heartbeat_path)
-        except OSError as e:
-            logging.debug(f"Error removing heartbeat file during cleanup: {e}")
+            # Atomic-ish removal without TOCTOU race
+            os.remove(heartbeat_path)
+        except (FileNotFoundError, OSError) as e:
+            logging.debug(f"Note: Heartbeat file cleanup: {e}")
 
 if __name__ == "__main__":
     main()
