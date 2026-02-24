@@ -127,14 +127,7 @@ def main():
 
                 # Main wait loop - monitoring connection if possible
                 while True:
-                    # 1. Update heartbeat file ONLY if we are supposedly connected
-                    try:
-                        with open(heartbeat_path, 'w') as f:
-                            f.write(str(time.time()))
-                    except OSError as e:
-                        logging.debug(f"Heartbeat write failed: {e}")
-
-                    # 2. Aggressive socket watchdog for TCP interfaces
+                    # 1. Aggressive socket watchdog for TCP interfaces
                     if system_config['interface_type'] == 'tcp' and hasattr(interface, 'socket') and interface.socket:
                         try:
                             # getpeername() raises OSError if the socket is no longer connected
@@ -145,12 +138,29 @@ def main():
                             time.sleep(2)
                             break
 
-                    # 3. Regular interface connectivity check
-                    if hasattr(interface, 'isConnected') and not interface.isConnected():
+                    # 2. Regular interface connectivity check
+                    is_conn = True
+                    if hasattr(interface, 'isConnected'):
+                        conn_status = interface.isConnected
+                        if isinstance(conn_status, threading.Event):
+                            is_conn = conn_status.is_set()
+                        elif callable(conn_status):
+                            is_conn = conn_status()
+                        else:
+                            is_conn = bool(conn_status)
+
+                    if not is_conn:
                         logging.error("Meshtastic interface disconnected.")
                         # Short back-off before retry loop cleanup
                         time.sleep(2)
                         break
+
+                    # 3. Heartbeat update (only reached if watchdogs and connectivity checks pass)
+                    try:
+                        with open(heartbeat_path, 'w') as f:
+                            f.write(str(time.time()))
+                    except OSError as e:
+                        logging.debug(f"Heartbeat write failed: {e}")
                     
                     time.sleep(5)
 
