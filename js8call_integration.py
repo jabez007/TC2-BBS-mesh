@@ -5,6 +5,7 @@ import sqlite3
 import configparser
 import logging
 import os
+import codecs
 from contextlib import closing
 
 from meshtastic import BROADCAST_NUM
@@ -75,19 +76,24 @@ class JS8CallClient:
         self.sock = None
         self.db_conn = None
         self.interface = interface
-        self.recv_buffer = ""
+        self.recv_buffer = bytearray()
+        self.decoder = codecs.getincrementaldecoder('utf-8')()
 
         if self.config.has_section('js8call'):
-            # check_same_thread=False allows background thread to use the connection
-            self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False, timeout=30)
-            # Enable Write-Ahead Logging (WAL) for better concurrency
             try:
-                self.db_conn.execute("PRAGMA journal_mode=WAL")
-                self.db_conn.execute("PRAGMA synchronous=NORMAL")
-                self.db_conn.commit()
+                # check_same_thread=False allows background thread to use the connection
+                self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False, timeout=30)
+                # Enable Write-Ahead Logging (WAL) for better concurrency
+                try:
+                    self.db_conn.execute("PRAGMA journal_mode=WAL")
+                    self.db_conn.execute("PRAGMA synchronous=NORMAL")
+                    self.db_conn.commit()
+                except sqlite3.Error:
+                    self.logger.exception("Failed to set WAL mode on JS8Call database")
+                self.create_tables()
             except sqlite3.Error:
-                self.logger.exception("Failed to set WAL mode on JS8Call database")
-            self.create_tables()
+                self.logger.exception(f"Failed to initialize JS8Call database at {self.db_file}")
+                self.db_conn = None
         else:
             self.logger.info("JS8Call configuration not found. Skipping JS8Call integration.")
 
@@ -218,7 +224,13 @@ class JS8CallClient:
             self.sock.sendall((message + '\n').encode('utf-8'))  # Use sendall for guaranteed delivery
         except OSError:
             self.logger.exception("Failed to send message to JS8Call")
-            # We don't take the lock here because it's a transient failure usually handled by connect loop
+            # Force unblock recv thread
+            try:
+                self.sock.shutdown(SHUT_RDWR)
+                self.sock.close()
+            except (OSError, AttributeError):
+                pass
+            self.sock = None
             self._set_connected(False)
 
     def connect(self, lock=None):
@@ -228,40 +240,43 @@ class JS8CallClient:
 
         self.logger.info(f"Connecting to {self.server}")
         self.sock = socket(AF_INET, SOCK_STREAM)
-        self.recv_buffer = ""
+        self.recv_buffer = bytearray()
+        self.decoder.reset()
+        
         try:
             self.sock.connect(self.server)
             self._set_connected(True, lock)
             self.send("STATION.GET_STATUS")
 
             while self.connected:
-                # Loop condition self.connected is checked here. 
-                # Teardown logic in finally will set self.connected = False under lock.
                 try:
                     data = self.sock.recv(65500)
                     if not data:
                         self.logger.info("JS8Call connection closed by peer.")
                         break  # Connection closed (EOF)
 
+                    # Incremental UTF-8 decoding to handle split characters
                     try:
-                        content = data.decode('utf-8')
+                        content = self.decoder.decode(data, final=False)
                     except UnicodeDecodeError:
                         self.logger.warning("Malformed UTF-8 bytes received from JS8Call, skipping chunk")
                         continue
 
                     # Safety cap on recv_buffer to prevent memory exhaustion
-                    if len(self.recv_buffer) + len(content) > MAX_RECV_BUFFER:
+                    if len(self.recv_buffer) + len(content.encode('utf-8')) > MAX_RECV_BUFFER:
                         self.logger.warning("JS8Call recv_buffer exceeded cap, clearing buffer")
-                        self.recv_buffer = ""
-                        # Continue to see if we can recover with the new chunk
-                        if len(content) > MAX_RECV_BUFFER:
+                        self.recv_buffer.clear()
+                        if len(content.encode('utf-8')) > MAX_RECV_BUFFER:
                             continue
 
-                    self.recv_buffer += content
+                    self.recv_buffer.extend(content.encode('utf-8'))
                     
-                    while '\n' in self.recv_buffer:
-                        line, self.recv_buffer = self.recv_buffer.split('\n', 1)
-                        line = line.strip()
+                    # Process lines from buffer
+                    while b'\n' in self.recv_buffer:
+                        line_bytes, remaining = self.recv_buffer.split(b'\n', 1)
+                        self.recv_buffer = bytearray(remaining)
+                        
+                        line = line_bytes.decode('utf-8', errors='replace').strip()
                         if not line:
                             continue
                         try:
@@ -282,6 +297,12 @@ class JS8CallClient:
             self.logger.exception("Unexpected error in JS8Call connection")
         finally:
             self._set_connected(False, lock)
+            # Flush decoder
+            try:
+                self.decoder.decode(b'', final=True)
+            except UnicodeDecodeError:
+                pass
+                
             if self.sock:
                 try:
                     self.sock.shutdown(SHUT_RDWR)
@@ -338,8 +359,7 @@ def handle_js8call_steps(sender_id, message, step, interface, state):
 def handle_group_messages_command(sender_id, interface):
     try:
         groups = []
-        db_path = get_js8_db_path()
-        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
+        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
             c.execute("SELECT DISTINCT groupname FROM groups ORDER BY groupname ASC")
             groups = c.fetchall()
@@ -359,8 +379,7 @@ def handle_group_messages_command(sender_id, interface):
 def handle_station_messages_command(sender_id, interface):
     try:
         messages = []
-        db_path = get_js8_db_path()
-        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
+        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
             # Order by most recent and limit to prevent oversized responses
             c.execute("SELECT sender, receiver, message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 10")
@@ -381,8 +400,7 @@ def handle_station_messages_command(sender_id, interface):
 def handle_urgent_messages_command(sender_id, interface):
     try:
         messages = []
-        db_path = get_js8_db_path()
-        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
+        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
             # Order by most recent and limit to prevent oversized responses
             c.execute("SELECT sender, groupname, message, timestamp FROM urgent ORDER BY timestamp DESC LIMIT 10")
@@ -418,8 +436,7 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
     groupname = groups[group_index][0]
     try:
         messages = []
-        db_path = get_js8_db_path()
-        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
+        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
             # Limit results
             c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=? ORDER BY timestamp DESC LIMIT 10", (groupname,))
