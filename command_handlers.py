@@ -167,7 +167,19 @@ def handle_bb_steps(sender_id, message, step, state, interface, bbs_nodes):
         if message.lower() == 'e':
             handle_help_command(sender_id, interface, 'bbs')
             return
-        board_name = boards[int(message)]
+        try:
+            board_index = int(message)
+        except ValueError:
+            send_message("Invalid input. Please enter a valid board number.", sender_id, interface)
+            handle_bulletin_command(sender_id, interface)
+            return
+
+        if board_index not in boards:
+            send_message("Invalid board selection. Please choose a valid number.", sender_id, interface)
+            handle_bulletin_command(sender_id, interface)
+            return
+            
+        board_name = boards[board_index]
         bulletins = get_bulletins(board_name)
         response = f"{board_name} has {len(bulletins)} messages.\n[R]ead  [P]ost"
         send_message(response, sender_id, interface)
@@ -539,8 +551,19 @@ def handle_check_bulletin_command(sender_id, message, interface):
             return
 
         boards = {0: "General", 1: "Info", 2: "News", 3: "Urgent"} #list of boards
-        board_name = parts[1].strip().capitalize() #get board name from quick command and capitalize it
-        board_name = boards[next(key for key, value in boards.items() if value == board_name)] #search for board name in list
+        board_name_input = parts[1].strip().capitalize() #get board name from quick command and capitalize it
+        
+        # Safe lookup for board name
+        board_name = None
+        for b in boards.values():
+            if b == board_name_input:
+                board_name = b
+                break
+        
+        if not board_name:
+            valid_boards = ", ".join(boards.values())
+            send_message(f"Board '{board_name_input}' not found. Valid boards: {valid_boards}", sender_id, interface)
+            return
 
         bulletins = get_bulletins(board_name)
         if not bulletins:
