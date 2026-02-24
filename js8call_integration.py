@@ -13,6 +13,7 @@ from command_handlers import handle_help_command
 from utils import send_message, update_user_state
 
 config_file = 'config.ini'
+MAX_RECV_BUFFER = 1024 * 1024 # 1MB limit for safety
 
 def get_js8_db_path(config_path=None):
     """Resolve JS8Call DB path at call time"""
@@ -24,9 +25,17 @@ def get_js8_db_path(config_path=None):
     config = configparser.ConfigParser()
     try:
         config.read(config_path)
-        return config.get('js8call', 'db_file', fallback='js8call.db')
+        db_file = config.get('js8call', 'db_file', fallback='js8call.db')
+        
+        # If relative, anchor to the directory of the config file
+        if not os.path.isabs(db_file):
+            config_dir = os.path.dirname(config_path)
+            db_file = os.path.abspath(os.path.join(config_dir, db_file))
+            
+        return db_file
     except (configparser.Error, OSError):
-        return 'js8call.db'
+        # Fallback to module-relative default if resolution fails
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), 'js8call.db'))
 
 # Cache DB path once at module load
 JS8_DB_PATH = get_js8_db_path()
@@ -240,6 +249,14 @@ class JS8CallClient:
                         self.logger.warning("Malformed UTF-8 bytes received from JS8Call, skipping chunk")
                         continue
 
+                    # Safety cap on recv_buffer to prevent memory exhaustion
+                    if len(self.recv_buffer) + len(content) > MAX_RECV_BUFFER:
+                        self.logger.warning("JS8Call recv_buffer exceeded cap, clearing buffer")
+                        self.recv_buffer = ""
+                        # Continue to see if we can recover with the new chunk
+                        if len(content) > MAX_RECV_BUFFER:
+                            continue
+
                     self.recv_buffer += content
                     
                     while '\n' in self.recv_buffer:
@@ -321,7 +338,8 @@ def handle_js8call_steps(sender_id, message, step, interface, state):
 def handle_group_messages_command(sender_id, interface):
     try:
         groups = []
-        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
+        db_path = get_js8_db_path()
+        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
             c = conn.cursor()
             c.execute("SELECT DISTINCT groupname FROM groups ORDER BY groupname ASC")
             groups = c.fetchall()
@@ -341,7 +359,8 @@ def handle_group_messages_command(sender_id, interface):
 def handle_station_messages_command(sender_id, interface):
     try:
         messages = []
-        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
+        db_path = get_js8_db_path()
+        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
             c = conn.cursor()
             # Order by most recent and limit to prevent oversized responses
             c.execute("SELECT sender, receiver, message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 10")
@@ -362,7 +381,8 @@ def handle_station_messages_command(sender_id, interface):
 def handle_urgent_messages_command(sender_id, interface):
     try:
         messages = []
-        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
+        db_path = get_js8_db_path()
+        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
             c = conn.cursor()
             # Order by most recent and limit to prevent oversized responses
             c.execute("SELECT sender, groupname, message, timestamp FROM urgent ORDER BY timestamp DESC LIMIT 10")
@@ -398,7 +418,8 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
     groupname = groups[group_index][0]
     try:
         messages = []
-        with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
+        db_path = get_js8_db_path()
+        with closing(sqlite3.connect(db_path, timeout=30)) as conn:
             c = conn.cursor()
             # Limit results
             c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=? ORDER BY timestamp DESC LIMIT 10", (groupname,))
