@@ -17,8 +17,9 @@ config_file = 'config.ini'
 def get_js8_db_path(config_path=None):
     """Resolve JS8Call DB path at call time"""
     if config_path is None:
-        # Resolve relative to current working directory or script location
-        config_path = os.path.abspath(config_file)
+        # Resolve relative to this module's directory instead of CWD
+        config_path = os.path.join(os.path.dirname(__file__), config_file)
+        config_path = os.path.abspath(config_path)
         
     config = configparser.ConfigParser()
     try:
@@ -46,7 +47,9 @@ class JS8CallClient:
         self.logger.propagate = False
 
         self.config = configparser.ConfigParser()
-        self.config.read(config_file)
+        # Ensure we read from the same resolved config path as the helper
+        config_path = os.path.join(os.path.dirname(__file__), config_file)
+        self.config.read(config_path)
 
         self.server = (
             self.config.get('js8call', 'host', fallback=None),
@@ -68,6 +71,13 @@ class JS8CallClient:
         if self.config.has_section('js8call'):
             # check_same_thread=False allows background thread to use the connection
             self.db_conn = sqlite3.connect(self.db_file, check_same_thread=False, timeout=30)
+            # Enable Write-Ahead Logging (WAL) for better concurrency
+            try:
+                self.db_conn.execute("PRAGMA journal_mode=WAL")
+                self.db_conn.execute("PRAGMA synchronous=NORMAL")
+                self.db_conn.commit()
+            except sqlite3.Error:
+                self.logger.exception("Failed to set WAL mode on JS8Call database")
             self.create_tables()
         else:
             self.logger.info("JS8Call configuration not found. Skipping JS8Call integration.")
@@ -241,7 +251,7 @@ class JS8CallClient:
                             message = json.loads(line)
                             if message:
                                 self.process(message)
-                        except ValueError as e:
+                        except json.JSONDecodeError as e:
                             self.logger.warning(f"Invalid JSON content received: {line}. Error: {e}")
                             continue
 
@@ -313,7 +323,7 @@ def handle_group_messages_command(sender_id, interface):
         groups = []
         with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
-            c.execute("SELECT DISTINCT groupname FROM groups")
+            c.execute("SELECT DISTINCT groupname FROM groups ORDER BY groupname ASC")
             groups = c.fetchall()
         
         if groups:
@@ -333,11 +343,13 @@ def handle_station_messages_command(sender_id, interface):
         messages = []
         with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
-            c.execute("SELECT sender, receiver, message, timestamp FROM messages")
+            # Order by most recent and limit to prevent oversized responses
+            c.execute("SELECT sender, receiver, message, timestamp FROM messages ORDER BY timestamp DESC LIMIT 10")
             messages = c.fetchall()
         
         if messages:
-            response = "Station Messages:\n" + "\n".join([f"[{i+1}] {msg[0]} -> {msg[1]}: {msg[2]} ({msg[3]})" for i, msg in enumerate(messages)])
+            # Display recent-first
+            response = "Recent Station Messages:\n" + "\n".join([f"[{i+1}] {msg[0]} -> {msg[1]}: {msg[2]} ({msg[3]})" for i, msg in enumerate(messages)])
             send_message(response, sender_id, interface)
         else:
             send_message("No station messages available.", sender_id, interface)
@@ -352,11 +364,13 @@ def handle_urgent_messages_command(sender_id, interface):
         messages = []
         with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
-            c.execute("SELECT sender, groupname, message, timestamp FROM urgent")
+            # Order by most recent and limit to prevent oversized responses
+            c.execute("SELECT sender, groupname, message, timestamp FROM urgent ORDER BY timestamp DESC LIMIT 10")
             messages = c.fetchall()
         
         if messages:
-            response = "Urgent Messages:\n" + "\n".join([f"[{i+1}] {msg[0]} -> {msg[1]}: {msg[2]} ({msg[3]})" for i, msg in enumerate(messages)])
+            # Display recent-first
+            response = "Recent Urgent Messages:\n" + "\n".join([f"[{i+1}] {msg[0]} -> {msg[1]}: {msg[2]} ({msg[3]})" for i, msg in enumerate(messages)])
             send_message(response, sender_id, interface)
         else:
             send_message("No urgent messages available.", sender_id, interface)
@@ -382,15 +396,16 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
         return
             
     groupname = groups[group_index][0]
-    messages = []
     try:
+        messages = []
         with closing(sqlite3.connect(JS8_DB_PATH, timeout=30)) as conn:
             c = conn.cursor()
-            c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=?", (groupname,))
+            # Limit results
+            c.execute("SELECT sender, message, timestamp FROM groups WHERE groupname=? ORDER BY timestamp DESC LIMIT 10", (groupname,))
             messages = c.fetchall()
 
         if messages:
-            response = f"Messages for group {groupname}:\n" + "\n".join([f"[{i+1}] {msg[0]}: {msg[1]} ({msg[2]})" for i, msg in enumerate(messages)])
+            response = f"Recent messages for group {groupname}:\n" + "\n".join([f"[{i+1}] {msg[0]}: {msg[1]} ({msg[2]})" for i, msg in enumerate(messages)])
             send_message(response, sender_id, interface)
         else:
             send_message(f"No messages for group {groupname}.", sender_id, interface)
