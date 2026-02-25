@@ -149,6 +149,9 @@ def main():
                             js8_thread.start()
 
                 logging.info("Connected to Meshtastic interface.")
+                
+                # Reset RX time on successful connection to avoid immediate watchdog trigger
+                last_rx_time = time.time()
 
                 # Main wait loop - monitoring connection if possible
                 while True:
@@ -164,22 +167,7 @@ def main():
                             should_sleep = True
                             break
 
-                    # 2. Reader thread health check (internal library thread)
-                    reader_alive = True
-                    if hasattr(interface, '_reader') and interface._reader:
-                        if not interface._reader.is_alive():
-                            logging.error("Meshtastic internal reader thread died.")
-                            reader_alive = False
-                            should_sleep = True
-                            break
-
-                    # 3. Packet receive watchdog (timeout if no data for 5 minutes)
-                    if now - last_rx_time > 300:
-                        logging.warning(f"No packets received for {int(now - last_rx_time)}s. Forcing reconnect.")
-                        should_sleep = True
-                        break
-
-                    # 4. Regular interface connectivity check
+                    # 2. Public connectivity check (replacing private reader thread check)
                     is_conn = True
                     if hasattr(interface, 'isConnected'):
                         conn_status = interface.isConnected
@@ -189,15 +177,22 @@ def main():
                             is_conn = conn_status()
                         else:
                             is_conn = bool(conn_status)
-
+                    
                     if not is_conn:
                         logging.error("Meshtastic interface reports disconnected.")
                         should_sleep = True
                         break
 
-                    # 5. Heartbeat update
+                    # 3. Packet receive watchdog (timeout if no data for 5 minutes)
+                    if now - last_rx_time > 300:
+                        logging.warning(f"No packets received for {int(now - last_rx_time)}s. Forcing reconnect.")
+                        should_sleep = True
+                        break
+
+                    # 4. Heartbeat update
                     # Format: TIMESTAMP|STATUS|READER_ALIVE|LAST_RX_TIME
-                    write_atomic_heartbeat(heartbeat_path, f"{now}|CONNECTED|{reader_alive}|{last_rx_time}")
+                    # Note: We keep 'READER_ALIVE' in format for healthcheck compatibility (always True here if loop continues)
+                    write_atomic_heartbeat(heartbeat_path, f"{now}|CONNECTED|True|{last_rx_time}")
                     
                     time.sleep(5)
 

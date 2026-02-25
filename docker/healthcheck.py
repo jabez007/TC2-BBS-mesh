@@ -7,6 +7,9 @@ import configparser
 import tempfile
 
 
+import math
+
+
 def get_config():
     """Read configuration from expected locations and return (config, path)"""
     config_paths = [
@@ -143,33 +146,31 @@ def check_heartbeat(server_pid, max_age=60):
         # Match server.py's priority: ./run/ then tempfile.gettempdir()
         search_dirs = [os.path.join(os.getcwd(), "run"), tempfile.gettempdir()]
         
-        found_path = None
+        candidates = []
         for d in search_dirs:
             if not os.path.exists(d):
                 continue
             
-            # Look for all matching files and find the newest one
-            matches = []
             try:
-                # Check for standard 'bbs_heartbeat' first
-                std_path = os.path.join(d, 'bbs_heartbeat')
-                if os.path.exists(std_path):
-                    matches.append(std_path)
-                
-                # Also check for PID-specific ones
                 for f in os.listdir(d):
-                    if f.startswith('bbs_heartbeat_'):
-                        matches.append(os.path.join(d, f))
+                    if f == 'bbs_heartbeat' or f.startswith('bbs_heartbeat_'):
+                        full_path = os.path.join(d, f)
+                        mtime = os.path.getmtime(full_path)
+                        
+                        # Store score (PID match priority) and mtime for sorting
+                        is_pid_match = server_pid and f == f'bbs_heartbeat_{server_pid}'
+                        candidates.append({
+                            'path': full_path,
+                            'mtime': mtime,
+                            'is_pid_match': is_pid_match
+                        })
             except OSError:
                 continue
-                
-            if matches:
-                # Sort by modification time, newest first
-                matches.sort(key=os.path.getmtime, reverse=True)
-                found_path = matches[0]
-                break
         
-        heartbeat_path = found_path
+        if candidates:
+            # Sort: PID match first, then newest mtime
+            candidates.sort(key=lambda x: (x['is_pid_match'], x['mtime']), reverse=True)
+            heartbeat_path = candidates[0]['path']
 
     if not heartbeat_path or not os.path.exists(heartbeat_path):
         if env_heartbeat_path:
@@ -186,6 +187,10 @@ def check_heartbeat(server_pid, max_age=60):
             if len(parts) >= 2:
                 ts_str, status = parts[0], parts[1]
                 mtime = float(ts_str)
+                if not math.isfinite(mtime):
+                    print(f"Invalid non-finite timestamp in heartbeat: {ts_str}")
+                    return False
+
                 is_connected = (status == "CONNECTED")
                 
                 # Check extended metrics if available
@@ -195,7 +200,16 @@ def check_heartbeat(server_pid, max_age=60):
                 
                 last_rx_time = mtime
                 if len(parts) >= 4:
-                    last_rx_time = float(parts[3])
+                    try:
+                        val = float(parts[3])
+                        if math.isfinite(val):
+                            last_rx_time = val
+                        else:
+                            print(f"Invalid non-finite RX timestamp: {parts[3]}")
+                            # fallback to mtime if RX timestamp is corrupt
+                            last_rx_time = mtime
+                    except ValueError:
+                        last_rx_time = mtime
             else:
                 mtime = os.path.getmtime(heartbeat_path)
                 is_connected = False
