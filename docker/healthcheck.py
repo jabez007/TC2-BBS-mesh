@@ -9,6 +9,10 @@ import tempfile
 
 import math
 
+# Configurable healthcheck timeout (defaults to 10 minutes)
+# Usually 2x the server's reconnect watchdog (2 * 300s = 600s)
+RX_TIMEOUT = int(os.environ.get('HEALTHCHECK_RX_TIMEOUT', 600))
+
 
 def get_config():
     """Read configuration from expected locations and return (config, path)"""
@@ -153,17 +157,21 @@ def check_heartbeat(server_pid, max_age=60):
             
             try:
                 for f in os.listdir(d):
-                    if f == 'bbs_heartbeat' or f.startswith('bbs_heartbeat_'):
-                        full_path = os.path.join(d, f)
-                        mtime = os.path.getmtime(full_path)
-                        
-                        # Store score (PID match priority) and mtime for sorting
-                        is_pid_match = server_pid and f == f'bbs_heartbeat_{server_pid}'
-                        candidates.append({
-                            'path': full_path,
-                            'mtime': mtime,
-                            'is_pid_match': is_pid_match
-                        })
+                    # Inner try/except to wrap only per-file operations so one failure doesn't stop scanning
+                    try:
+                        if f == 'bbs_heartbeat' or f.startswith('bbs_heartbeat_'):
+                            full_path = os.path.join(d, f)
+                            mtime = os.path.getmtime(full_path)
+                            
+                            # Store score (PID match priority) and mtime for sorting
+                            is_pid_match = server_pid and f == f'bbs_heartbeat_{server_pid}'
+                            candidates.append({
+                                'path': full_path,
+                                'mtime': mtime,
+                                'is_pid_match': is_pid_match
+                            })
+                    except OSError:
+                        continue
             except OSError:
                 continue
         
@@ -180,6 +188,7 @@ def check_heartbeat(server_pid, max_age=60):
         return False
     
     try:
+        now = time.time()
         with open(heartbeat_path, 'r') as f:
             content = f.read().strip()
             parts = content.split('|')
@@ -210,6 +219,11 @@ def check_heartbeat(server_pid, max_age=60):
                             last_rx_time = mtime
                     except ValueError:
                         last_rx_time = mtime
+                
+                # Double check last_rx_time is finite for safe age calculation
+                if not math.isfinite(last_rx_time):
+                    print(f"Invalid non-finite last_rx_time: {last_rx_time}")
+                    last_rx_time = mtime
             else:
                 mtime = os.path.getmtime(heartbeat_path)
                 is_connected = False
@@ -217,8 +231,8 @@ def check_heartbeat(server_pid, max_age=60):
                 last_rx_time = 0
                 status = "LEGACY_OR_MALFORMED"
 
-        age = time.time() - mtime
-        rx_age = time.time() - last_rx_time
+        age = now - mtime
+        rx_age = now - last_rx_time
         
         # 1. Age check (is the process even looping?)
         if age > max_age:
@@ -236,7 +250,8 @@ def check_heartbeat(server_pid, max_age=60):
             return False
             
         # 4. Packet timeout check (has it received anything lately?)
-        if rx_age > 600: # 10 minutes max without any radio data
+        # Marginal delay (RX_TIMEOUT defaults to 600s = 2 x 300s server reconnect timeout)
+        if rx_age > RX_TIMEOUT:
             print(f"No radio data received for {rx_age:.1f}s (zombie state)")
             return False
             
