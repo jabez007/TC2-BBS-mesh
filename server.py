@@ -60,7 +60,7 @@ def write_atomic_heartbeat(path, content):
             temp_path = tf.name
         # Atomically rename the temp file to the target path
         os.replace(temp_path, path)
-    except Exception as e:
+    except OSError as e:
         logging.debug(f"Atomic heartbeat write failed: {e}")
         # Cleanup temp file if it exists and wasn't renamed
         if 'temp_path' in locals() and os.path.exists(temp_path):
