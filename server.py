@@ -134,8 +134,8 @@ def main():
                             interface.socket.getpeername()
                         except OSError:
                             logging.warning("Detected disconnected socket in underlying TCP watchdog.")
-                            # Short back-off before retry loop cleanup
-                            time.sleep(2)
+                            # Force back-off before retry loop cleanup
+                            should_sleep = True
                             break
 
                     # 2. Regular interface connectivity check
@@ -151,14 +151,14 @@ def main():
 
                     if not is_conn:
                         logging.error("Meshtastic interface disconnected.")
-                        # Short back-off before retry loop cleanup
-                        time.sleep(2)
+                        # Force back-off before retry loop cleanup
+                        should_sleep = True
                         break
 
                     # 3. Heartbeat update (only reached if watchdogs and connectivity checks pass)
                     try:
                         with open(heartbeat_path, 'w') as f:
-                            f.write(str(time.time()))
+                            f.write(f"{time.time()}|CONNECTED")
                     except OSError as e:
                         logging.debug(f"Heartbeat write failed: {e}")
                     
@@ -189,6 +189,13 @@ def main():
                         logging.exception("Error closing interface in main loop finally")
                     interface = None # Ensure reference is cleared for next iteration or shutdown
                 
+                # Update heartbeat to reflect state during back-off/reconnection
+                try:
+                    with open(heartbeat_path, 'w') as f:
+                        f.write(f"{time.time()}|DISCONNECTED")
+                except OSError as e:
+                    logging.debug(f"Heartbeat write failed in finally: {e}")
+
                 if should_sleep:
                     logging.info("Waiting 10 seconds before reconnection attempt...")
                     time.sleep(10)
