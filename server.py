@@ -108,8 +108,11 @@ def main():
         # Fallback to platform-native temp dir (satisfies Ruff S108)
         runtime_dir = tempfile.gettempdir()
         
-    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, f'bbs_heartbeat_{os.getpid()}'))
+    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, 'bbs_heartbeat'))
     logging.info(f"Using heartbeat path: {heartbeat_path}")
+
+    # Track last received packet for a deep health check
+    last_rx_time = time.time()
 
     try:
         while True:
@@ -123,6 +126,8 @@ def main():
                 interface.allowed_nodes = system_config['allowed_nodes']
 
                 def receive_packet(packet, interface=interface):
+                    nonlocal last_rx_time
+                    last_rx_time = time.time()
                     on_receive(packet, interface)
 
                 pub.subscribe(receive_packet, system_config['mqtt_topic'])
@@ -147,6 +152,8 @@ def main():
 
                 # Main wait loop - monitoring connection if possible
                 while True:
+                    now = time.time()
+                    
                     # 1. Aggressive socket watchdog for TCP interfaces
                     if system_config['interface_type'] == 'tcp' and hasattr(interface, 'socket') and interface.socket:
                         try:
@@ -154,11 +161,25 @@ def main():
                             interface.socket.getpeername()
                         except OSError:
                             logging.warning("Detected disconnected socket in underlying TCP watchdog.")
-                            # Force back-off before retry loop cleanup
                             should_sleep = True
                             break
 
-                    # 2. Regular interface connectivity check
+                    # 2. Reader thread health check (internal library thread)
+                    reader_alive = True
+                    if hasattr(interface, '_reader') and interface._reader:
+                        if not interface._reader.is_alive():
+                            logging.error("Meshtastic internal reader thread died.")
+                            reader_alive = False
+                            should_sleep = True
+                            break
+
+                    # 3. Packet receive watchdog (timeout if no data for 5 minutes)
+                    if now - last_rx_time > 300:
+                        logging.warning(f"No packets received for {int(now - last_rx_time)}s. Forcing reconnect.")
+                        should_sleep = True
+                        break
+
+                    # 4. Regular interface connectivity check
                     is_conn = True
                     if hasattr(interface, 'isConnected'):
                         conn_status = interface.isConnected
@@ -170,13 +191,13 @@ def main():
                             is_conn = bool(conn_status)
 
                     if not is_conn:
-                        logging.error("Meshtastic interface disconnected.")
-                        # Force back-off before retry loop cleanup
+                        logging.error("Meshtastic interface reports disconnected.")
                         should_sleep = True
                         break
 
-                    # 3. Heartbeat update (only reached if watchdogs and connectivity checks pass)
-                    write_atomic_heartbeat(heartbeat_path, f"{time.time()}|CONNECTED")
+                    # 5. Heartbeat update
+                    # Format: TIMESTAMP|STATUS|READER_ALIVE|LAST_RX_TIME
+                    write_atomic_heartbeat(heartbeat_path, f"{now}|CONNECTED|{reader_alive}|{last_rx_time}")
                     
                     time.sleep(5)
 
@@ -206,7 +227,7 @@ def main():
                     interface = None # Ensure reference is cleared for next iteration or shutdown
                 
                 # Update heartbeat to reflect state during back-off/reconnection
-                write_atomic_heartbeat(heartbeat_path, f"{time.time()}|DISCONNECTED")
+                write_atomic_heartbeat(heartbeat_path, f"{time.time()}|DISCONNECTED|False|{last_rx_time}")
 
                 if should_sleep:
                     logging.info("Waiting 10 seconds before reconnection attempt...")

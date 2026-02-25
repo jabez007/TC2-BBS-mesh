@@ -147,23 +147,26 @@ def check_heartbeat(server_pid, max_age=60):
         for d in search_dirs:
             if not os.path.exists(d):
                 continue
-                
-            if server_pid:
-                test_path = os.path.join(d, f'bbs_heartbeat_{server_pid}')
-                if os.path.exists(test_path):
-                    found_path = test_path
-                    break
             
-            # If PID specific file not found or server_pid is None, look for any matching file in this dir
+            # Look for all matching files and find the newest one
+            matches = []
             try:
+                # Check for standard 'bbs_heartbeat' first
+                std_path = os.path.join(d, 'bbs_heartbeat')
+                if os.path.exists(std_path):
+                    matches.append(std_path)
+                
+                # Also check for PID-specific ones
                 for f in os.listdir(d):
                     if f.startswith('bbs_heartbeat_'):
-                        found_path = os.path.join(d, f)
-                        break
+                        matches.append(os.path.join(d, f))
             except OSError:
                 continue
                 
-            if found_path:
+            if matches:
+                # Sort by modification time, newest first
+                matches.sort(key=os.path.getmtime, reverse=True)
+                found_path = matches[0]
                 break
         
         heartbeat_path = found_path
@@ -178,29 +181,56 @@ def check_heartbeat(server_pid, max_age=60):
     try:
         with open(heartbeat_path, 'r') as f:
             content = f.read().strip()
-            if '|' in content:
-                ts_str, status = content.split('|', 1)
+            parts = content.split('|')
+            
+            if len(parts) >= 2:
+                ts_str, status = parts[0], parts[1]
                 mtime = float(ts_str)
                 is_connected = (status == "CONNECTED")
+                
+                # Check extended metrics if available
+                reader_alive = True
+                if len(parts) >= 3:
+                    reader_alive = (parts[2].lower() == 'true')
+                
+                last_rx_time = mtime
+                if len(parts) >= 4:
+                    last_rx_time = float(parts[3])
             else:
                 mtime = os.path.getmtime(heartbeat_path)
                 is_connected = False
-                status = "UNKNOWN"
+                reader_alive = False
+                last_rx_time = 0
+                status = "LEGACY_OR_MALFORMED"
 
         age = time.time() - mtime
+        rx_age = time.time() - last_rx_time
+        
+        # 1. Age check (is the process even looping?)
         if age > max_age:
             print(f"Heartbeat file too old: {age:.1f}s (max {max_age}s)")
             return False
         
+        # 2. Status check (is the BBS reporting it's connected?)
         if not is_connected:
             print(f"BBS reports unhealthy status: {status}")
+            return False
+            
+        # 3. Reader thread check (deep health check)
+        if not reader_alive:
+            print("BBS reports internal reader thread is dead")
+            return False
+            
+        # 4. Packet timeout check (has it received anything lately?)
+        if rx_age > 600: # 10 minutes max without any radio data
+            print(f"No radio data received for {rx_age:.1f}s (zombie state)")
             return False
             
     except (OSError, ValueError) as e:
         print(f"Error checking heartbeat file: {e}")
         return False
     else:
-        print(f"Heartbeat is fresh ({age:.1f}s) and BBS is {status}")
+        print(f"BBS is healthy: {status}, Reader: {reader_alive}, LastRX: {int(rx_age)}s ago")
         return True
 
 
