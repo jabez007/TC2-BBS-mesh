@@ -49,6 +49,26 @@ js8call_logger.addHandler(js8call_handler)
 
 js8_thread_lock = threading.Lock()
 
+def write_atomic_heartbeat(path, content):
+    """Atomically writes content to path using a temporary file."""
+    dir_name = os.path.dirname(path)
+    base_name = os.path.basename(path)
+    try:
+        # Create temp file in the same directory as the target path
+        with tempfile.NamedTemporaryFile('w', dir=dir_name, prefix=f".{base_name}", delete=False) as tf:
+            tf.write(content)
+            temp_path = tf.name
+        # Atomically rename the temp file to the target path
+        os.replace(temp_path, path)
+    except Exception as e:
+        logging.debug(f"Atomic heartbeat write failed: {e}")
+        # Cleanup temp file if it exists and wasn't renamed
+        if 'temp_path' in locals() and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
 def display_banner():
     banner = """
 ████████╗ ██████╗██████╗       ██████╗ ██████╗ ███████╗
@@ -156,11 +176,7 @@ def main():
                         break
 
                     # 3. Heartbeat update (only reached if watchdogs and connectivity checks pass)
-                    try:
-                        with open(heartbeat_path, 'w') as f:
-                            f.write(f"{time.time()}|CONNECTED")
-                    except OSError as e:
-                        logging.debug(f"Heartbeat write failed: {e}")
+                    write_atomic_heartbeat(heartbeat_path, f"{time.time()}|CONNECTED")
                     
                     time.sleep(5)
 
@@ -190,11 +206,7 @@ def main():
                     interface = None # Ensure reference is cleared for next iteration or shutdown
                 
                 # Update heartbeat to reflect state during back-off/reconnection
-                try:
-                    with open(heartbeat_path, 'w') as f:
-                        f.write(f"{time.time()}|DISCONNECTED")
-                except OSError as e:
-                    logging.debug(f"Heartbeat write failed in finally: {e}")
+                write_atomic_heartbeat(heartbeat_path, f"{time.time()}|DISCONNECTED")
 
                 if should_sleep:
                     logging.info("Waiting 10 seconds before reconnection attempt...")

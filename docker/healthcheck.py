@@ -38,7 +38,7 @@ def check_meshtastic_connection(host="localhost", port=4403):
         # 2. Send a Meshtastic ToRadio protobuf with want_config_id: 1
         # Framing: 0x94 0xc3 (sync), 0x00 0x02 (length), 0x08 0x01 (payload)
         heartbeat_msg = b"\x94\xc3\x00\x02\x08\x01"
-        s.send(heartbeat_msg)
+        s.sendall(heartbeat_msg)
 
         # 3. Try to read response to ensure bidirectional communication works
         s.settimeout(2)
@@ -184,7 +184,7 @@ def check_heartbeat(server_pid, max_age=60):
                 is_connected = (status == "CONNECTED")
             else:
                 mtime = os.path.getmtime(heartbeat_path)
-                is_connected = True # Fallback for old versions
+                is_connected = False
                 status = "UNKNOWN"
 
         age = time.time() - mtime
