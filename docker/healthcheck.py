@@ -29,28 +29,30 @@ def get_config():
 
 
 def check_meshtastic_connection(host="localhost", port=4403):
-    """Test if the meshtastic TCP API port is open (safely via handshake and peek)"""
+    """Test if the meshtastic TCP API port is open and responding with protocol handshake"""
     s = None
     try:
-        # 1. Test the Handshake
+        # 1. Connect to the radio
         s = socket.create_connection((host, port), timeout=3)
         
-        # 2. Test the READ side to ensure the remote hasn't hung up
-        s.settimeout(1)
-        try:
-            # Peek to see if the connection is still alive (b"" means EOF/Closed)
-            # This is safe and doesn't break framing
-            if s.recv(1, socket.MSG_PEEK) == b"":
-                return False, "EOF from remote"
-        except socket.timeout:
-            # Timeout is GOOD - it means the connection is open but quiet
-            pass
+        # 2. Send a Meshtastic ToRadio protobuf with want_config_id: 1
+        # Framing: 0x94 0xc3 (sync), 0x00 0x02 (length), 0x08 0x01 (payload)
+        heartbeat_msg = b"\x94\xc3\x00\x02\x08\x01"
+        s.sendall(heartbeat_msg)
+
+        # 3. Try to read response to ensure bidirectional communication works
+        s.settimeout(2)
+        response = s.recv(1024)
+        if len(response) >= 2 and response[0] == 0x94 and response[1] == 0xc3:
+            return True, "Handshake successful"
+        else:
+            return False, "Invalid radio response"
             
+    except ConnectionRefusedError:
+        # This is expected if the radio only allows one connection and the BBS is connected
+        return True, "Radio busy (likely connected to BBS)"
     except OSError as e:
-        # Note: This is expected if the radio only allows a single connection and the BBS is connected
         return False, str(e)
-    else:
-        return True, "Handshake successful"
     finally:
         if s:
             try:
@@ -132,7 +134,7 @@ def check_process_health():
 
 
 def check_heartbeat(server_pid, max_age=60):
-    """Check if the heartbeat file is recent"""
+    """Check if the heartbeat file is recent and status is healthy"""
     # Try custom path from env
     env_heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH')
     heartbeat_path = env_heartbeat_path
@@ -174,16 +176,31 @@ def check_heartbeat(server_pid, max_age=60):
         return False
     
     try:
-        mtime = os.path.getmtime(heartbeat_path)
+        with open(heartbeat_path, 'r') as f:
+            content = f.read().strip()
+            if '|' in content:
+                ts_str, status = content.split('|', 1)
+                mtime = float(ts_str)
+                is_connected = (status == "CONNECTED")
+            else:
+                mtime = os.path.getmtime(heartbeat_path)
+                is_connected = False
+                status = "UNKNOWN"
+
         age = time.time() - mtime
         if age > max_age:
             print(f"Heartbeat file too old: {age:.1f}s (max {max_age}s)")
             return False
-    except OSError as e:
+        
+        if not is_connected:
+            print(f"BBS reports unhealthy status: {status}")
+            return False
+            
+    except (OSError, ValueError) as e:
         print(f"Error checking heartbeat file: {e}")
         return False
     else:
-        print(f"Heartbeat file is fresh: {age:.1f}s old")
+        print(f"Heartbeat is fresh ({age:.1f}s) and BBS is {status}")
         return True
 
 
