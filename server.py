@@ -113,8 +113,22 @@ def main():
     logging.info(f"Using heartbeat path: {heartbeat_path}")
 
     # Watchdog and Keepalive configuration
-    WATCHDOG_TIMEOUT = int(os.environ.get('BBS_WATCHDOG_TIMEOUT', 300))
-    KEEPALIVE_INTERVAL = int(os.environ.get('BBS_KEEPALIVE_INTERVAL', 120))
+    try:
+        WATCHDOG_TIMEOUT = int(os.environ.get('BBS_WATCHDOG_TIMEOUT', 300))
+        if WATCHDOG_TIMEOUT <= 0:
+            logging.warning("BBS_WATCHDOG_TIMEOUT must be positive. Falling back to default (300).")
+            WATCHDOG_TIMEOUT = 300
+    except (ValueError, TypeError):
+        WATCHDOG_TIMEOUT = 300
+
+    try:
+        KEEPALIVE_INTERVAL = int(os.environ.get('BBS_KEEPALIVE_INTERVAL', 120))
+        if KEEPALIVE_INTERVAL <= 0:
+            logging.warning("BBS_KEEPALIVE_INTERVAL must be positive. Falling back to default (120).")
+            KEEPALIVE_INTERVAL = 120
+    except (ValueError, TypeError):
+        KEEPALIVE_INTERVAL = 120
+    
     logging.info(f"Watchdog timeout: {WATCHDOG_TIMEOUT}s, Keepalive interval: {KEEPALIVE_INTERVAL}s")
 
     # Track last received packet for a deep health check (protected by last_rx_lock)
@@ -160,6 +174,9 @@ def main():
                 # Reset RX time on successful connection to avoid immediate watchdog trigger
                 with last_rx_lock:
                     last_rx_time = time.time()
+                
+                # Throttle keepalive traffic to avoid storms
+                last_keepalive_sent = 0
 
                 # Main wait loop - monitoring connection if possible
                 while True:
@@ -186,18 +203,11 @@ def main():
                         else:
                             is_conn = bool(conn_status)
                     
-                    # Determine reader thread liveness (internal to library)
+                    # Deriving reader_alive from public is_conn indicator
                     reader_alive = is_conn
-                    if hasattr(interface, '_reader') and interface._reader:
-                        reader_alive = interface._reader.is_alive()
 
                     if not is_conn:
                         logging.error("Meshtastic interface reports disconnected.")
-                        should_sleep = True
-                        break
-                    
-                    if not reader_alive:
-                        logging.error("Meshtastic internal reader thread died.")
                         should_sleep = True
                         break
 
@@ -211,12 +221,13 @@ def main():
                         logging.warning(f"No packets received for {int(rx_delta)}s. Forcing reconnect.")
                         should_sleep = True
                         break
-                    elif rx_delta > KEEPALIVE_INTERVAL:
+                    elif rx_delta > KEEPALIVE_INTERVAL and (now - last_keepalive_sent) > KEEPALIVE_INTERVAL:
                         # Generate keepalive traffic to maintain connection on quiet meshes
                         # We do a safe request like getting node info to trigger activity
                         try:
                             logging.debug("Mesh quiet, generating keepalive traffic...")
                             interface.getNode(interface.myInfo.my_node_id)
+                            last_keepalive_sent = now
                         except Exception as e:
                             logging.debug(f"Keepalive traffic failed: {e}")
 

@@ -11,7 +11,12 @@ import math
 
 # Configurable healthcheck timeout (defaults to 10 minutes)
 # Usually 2x the server's reconnect watchdog (2 * 300s = 600s)
-RX_TIMEOUT = int(os.environ.get('HEALTHCHECK_RX_TIMEOUT', 600))
+try:
+    RX_TIMEOUT = int(os.environ.get('HEALTHCHECK_RX_TIMEOUT', 600))
+    if RX_TIMEOUT <= 0:
+        RX_TIMEOUT = 600
+except (ValueError, TypeError):
+    RX_TIMEOUT = 600
 
 
 def get_config():
