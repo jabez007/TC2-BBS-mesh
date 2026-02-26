@@ -4,6 +4,8 @@ import threading
 import uuid
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 from meshtastic import BROADCAST_NUM
 
 from utils import (
@@ -143,16 +145,16 @@ def delete_mail(unique_id, recipient_id, bbs_nodes, interface):
         c.execute("SELECT recipient FROM mail WHERE unique_id = ?", (unique_id,))
         result = c.fetchone()
         if result is None:
-            logging.error(f"No mail found with unique_id: {unique_id}")
+            logger.error(f"No mail found with unique_id: {unique_id}")
             return  # Early exit if no matching mail found
         recipient_id = result[0]
-        logging.info(f"Attempting to delete mail with unique_id: {unique_id} by {recipient_id}")
+        logger.info(f"Attempting to delete mail with unique_id: {unique_id} by {recipient_id}")
         c.execute("DELETE FROM mail WHERE unique_id = ? and recipient = ?", (unique_id, recipient_id,))
         conn.commit()
         send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, interface)
-        logging.info(f"Mail with unique_id: {unique_id} deleted and sync message sent.")
-    except Exception as e:
-        logging.error(f"Error deleting mail with unique_id {unique_id}: {e}")
+        logger.info(f"Mail with unique_id: {unique_id} deleted and sync message sent.")
+    except Exception:
+        logger.exception(f"Error deleting mail with unique_id {unique_id}")
         raise
 
 

@@ -55,10 +55,13 @@ def check_meshtastic_connection(host="localhost", port=4403):
         # 3. Try to read response to ensure bidirectional communication works
         s.settimeout(2)
         response = s.recv(1024)
+        if not response:
+            return True, "Radio busy (connection closed by peer)"
+            
         if len(response) >= 2 and response[0] == 0x94 and response[1] == 0xc3:
             return True, "Handshake successful"
         else:
-            return False, "Invalid radio response"
+            return False, f"Invalid radio response: {response.hex()}"
             
     except ConnectionRefusedError:
         # This is expected if the radio only allows one connection and the BBS is connected
@@ -156,9 +159,12 @@ def check_heartbeat(server_pid, max_age=60):
         search_dirs = [os.path.join(os.getcwd(), "run"), tempfile.gettempdir()]
         
         candidates = []
-        for d in search_dirs:
+        for i, d in enumerate(search_dirs):
             if not os.path.exists(d):
                 continue
+            
+            # Directory priority: earlier directories in search_dirs have higher priority
+            dir_priority = len(search_dirs) - i
             
             try:
                 for f in os.listdir(d):
@@ -173,7 +179,8 @@ def check_heartbeat(server_pid, max_age=60):
                             candidates.append({
                                 'path': full_path,
                                 'mtime': mtime,
-                                'is_pid_match': is_pid_match
+                                'is_pid_match': is_pid_match,
+                                'dir_priority': dir_priority
                             })
                     except OSError:
                         continue
@@ -181,8 +188,8 @@ def check_heartbeat(server_pid, max_age=60):
                 continue
         
         if candidates:
-            # Sort: PID match first, then newest mtime
-            candidates.sort(key=lambda x: (x['is_pid_match'], x['mtime']), reverse=True)
+            # Sort: PID match first, then preferred directory, then newest mtime
+            candidates.sort(key=lambda x: (x['is_pid_match'], x['dir_priority'], x['mtime']), reverse=True)
             heartbeat_path = candidates[0]['path']
 
     if not heartbeat_path or not os.path.exists(heartbeat_path):
