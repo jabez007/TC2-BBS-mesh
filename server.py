@@ -223,10 +223,21 @@ def main():
                         break
                     elif rx_delta > KEEPALIVE_INTERVAL and (now - last_keepalive_sent) > KEEPALIVE_INTERVAL:
                         # Generate keepalive traffic to maintain connection on quiet meshes
-                        # We do a safe request like getting node info to trigger activity
+                        # Querying a remote node ID if available to trigger network I/O
                         try:
                             logging.debug("Mesh quiet, generating keepalive traffic...")
-                            interface.getNode(interface.myInfo.my_node_id)
+                            target_node = interface.myInfo.my_node_id
+                            if interface.bbs_nodes:
+                                # Use a known remote BBS node
+                                target_node = interface.bbs_nodes[0]
+                            elif hasattr(interface, 'nodes') and interface.nodes:
+                                # Use any known remote node
+                                for nid in interface.nodes:
+                                    if nid != interface.myInfo.my_node_id:
+                                        target_node = nid
+                                        break
+                            
+                            interface.getNode(target_node)
                             last_keepalive_sent = now
                         except Exception as e:
                             logging.debug(f"Keepalive traffic failed: {e}")

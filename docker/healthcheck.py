@@ -236,8 +236,18 @@ def check_heartbeat(server_pid, max_age=60):
                 last_rx_time = 0
                 status = "LEGACY_OR_MALFORMED"
 
-        age = now - mtime
-        rx_age = now - last_rx_time
+        # Prevent negative ages from future timestamps
+        if mtime > now:
+            print(f"Warning: Heartbeat timestamp is in the future ({mtime - now:.1f}s). Treating as stale.")
+            age = float('inf')
+        else:
+            age = now - mtime
+
+        if last_rx_time > now:
+            print(f"Warning: Last RX timestamp is in the future ({last_rx_time - now:.1f}s). Treating as stale.")
+            rx_age = float('inf')
+        else:
+            rx_age = now - last_rx_time
         
         # 1. Age check (is the process even looping?)
         if age > max_age:
