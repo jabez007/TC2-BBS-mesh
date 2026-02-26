@@ -7,6 +7,18 @@ import configparser
 import tempfile
 
 
+import math
+
+# Configurable healthcheck timeout (defaults to 10 minutes)
+# Usually 2x the server's reconnect watchdog (2 * 300s = 600s)
+try:
+    RX_TIMEOUT = int(os.environ.get('HEALTHCHECK_RX_TIMEOUT', 600))
+    if RX_TIMEOUT <= 0:
+        RX_TIMEOUT = 600
+except (ValueError, TypeError):
+    RX_TIMEOUT = 600
+
+
 def get_config():
     """Read configuration from expected locations and return (config, path)"""
     config_paths = [
@@ -143,30 +155,35 @@ def check_heartbeat(server_pid, max_age=60):
         # Match server.py's priority: ./run/ then tempfile.gettempdir()
         search_dirs = [os.path.join(os.getcwd(), "run"), tempfile.gettempdir()]
         
-        found_path = None
+        candidates = []
         for d in search_dirs:
             if not os.path.exists(d):
                 continue
-                
-            if server_pid:
-                test_path = os.path.join(d, f'bbs_heartbeat_{server_pid}')
-                if os.path.exists(test_path):
-                    found_path = test_path
-                    break
             
-            # If PID specific file not found or server_pid is None, look for any matching file in this dir
             try:
                 for f in os.listdir(d):
-                    if f.startswith('bbs_heartbeat_'):
-                        found_path = os.path.join(d, f)
-                        break
+                    # Inner try/except to wrap only per-file operations so one failure doesn't stop scanning
+                    try:
+                        if f == 'bbs_heartbeat' or f.startswith('bbs_heartbeat_'):
+                            full_path = os.path.join(d, f)
+                            mtime = os.path.getmtime(full_path)
+                            
+                            # Store score (PID match priority) and mtime for sorting
+                            is_pid_match = server_pid and f == f'bbs_heartbeat_{server_pid}'
+                            candidates.append({
+                                'path': full_path,
+                                'mtime': mtime,
+                                'is_pid_match': is_pid_match
+                            })
+                    except OSError:
+                        continue
             except OSError:
                 continue
-                
-            if found_path:
-                break
         
-        heartbeat_path = found_path
+        if candidates:
+            # Sort: PID match first, then newest mtime
+            candidates.sort(key=lambda x: (x['is_pid_match'], x['mtime']), reverse=True)
+            heartbeat_path = candidates[0]['path']
 
     if not heartbeat_path or not os.path.exists(heartbeat_path):
         if env_heartbeat_path:
@@ -176,31 +193,88 @@ def check_heartbeat(server_pid, max_age=60):
         return False
     
     try:
+        now = time.time()
         with open(heartbeat_path, 'r') as f:
             content = f.read().strip()
-            if '|' in content:
-                ts_str, status = content.split('|', 1)
+            parts = content.split('|')
+            
+            if len(parts) >= 2:
+                ts_str, status = parts[0], parts[1]
                 mtime = float(ts_str)
+                if not math.isfinite(mtime):
+                    print(f"Invalid non-finite timestamp in heartbeat: {ts_str}")
+                    return False
+
                 is_connected = (status == "CONNECTED")
+                
+                # Check extended metrics if available
+                reader_alive = True
+                if len(parts) >= 3:
+                    reader_alive = (parts[2].lower() == 'true')
+                
+                last_rx_time = mtime
+                if len(parts) >= 4:
+                    try:
+                        val = float(parts[3])
+                        if math.isfinite(val):
+                            last_rx_time = val
+                        else:
+                            print(f"Invalid non-finite RX timestamp: {parts[3]}")
+                            # fallback to mtime if RX timestamp is corrupt
+                            last_rx_time = mtime
+                    except ValueError:
+                        last_rx_time = mtime
+                
+                # Double check last_rx_time is finite for safe age calculation
+                if not math.isfinite(last_rx_time):
+                    print(f"Invalid non-finite last_rx_time: {last_rx_time}")
+                    last_rx_time = mtime
             else:
                 mtime = os.path.getmtime(heartbeat_path)
                 is_connected = False
-                status = "UNKNOWN"
+                reader_alive = False
+                last_rx_time = 0
+                status = "LEGACY_OR_MALFORMED"
 
-        age = time.time() - mtime
+        # Prevent negative ages from future timestamps
+        if mtime > now:
+            print(f"Warning: Heartbeat timestamp is in the future ({mtime - now:.1f}s). Treating as stale.")
+            age = float('inf')
+        else:
+            age = now - mtime
+
+        if last_rx_time > now:
+            print(f"Warning: Last RX timestamp is in the future ({last_rx_time - now:.1f}s). Treating as stale.")
+            rx_age = float('inf')
+        else:
+            rx_age = now - last_rx_time
+        
+        # 1. Age check (is the process even looping?)
         if age > max_age:
             print(f"Heartbeat file too old: {age:.1f}s (max {max_age}s)")
             return False
         
+        # 2. Status check (is the BBS reporting it's connected?)
         if not is_connected:
             print(f"BBS reports unhealthy status: {status}")
+            return False
+            
+        # 3. Reader thread check (deep health check)
+        if not reader_alive:
+            print("BBS reports internal reader thread is dead")
+            return False
+            
+        # 4. Packet timeout check (has it received anything lately?)
+        # Marginal delay (RX_TIMEOUT defaults to 600s = 2 x 300s server reconnect timeout)
+        if rx_age > RX_TIMEOUT:
+            print(f"No radio data received for {rx_age:.1f}s (zombie state)")
             return False
             
     except (OSError, ValueError) as e:
         print(f"Error checking heartbeat file: {e}")
         return False
     else:
-        print(f"Heartbeat is fresh ({age:.1f}s) and BBS is {status}")
+        print(f"BBS is healthy: {status}, Reader: {reader_alive}, LastRX: {int(rx_age)}s ago")
         return True
 
 

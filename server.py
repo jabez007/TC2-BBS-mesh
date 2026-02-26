@@ -48,6 +48,7 @@ js8call_handler.setFormatter(js8call_formatter)
 js8call_logger.addHandler(js8call_handler)
 
 js8_thread_lock = threading.Lock()
+last_rx_lock = threading.Lock()
 
 def write_atomic_heartbeat(path, content):
     """Atomically writes content to path using a temporary file."""
@@ -108,8 +109,30 @@ def main():
         # Fallback to platform-native temp dir (satisfies Ruff S108)
         runtime_dir = tempfile.gettempdir()
         
-    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, f'bbs_heartbeat_{os.getpid()}'))
+    heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, 'bbs_heartbeat'))
     logging.info(f"Using heartbeat path: {heartbeat_path}")
+
+    # Watchdog and Keepalive configuration
+    try:
+        WATCHDOG_TIMEOUT = int(os.environ.get('BBS_WATCHDOG_TIMEOUT', 300))
+        if WATCHDOG_TIMEOUT <= 0:
+            logging.warning("BBS_WATCHDOG_TIMEOUT must be positive. Falling back to default (300).")
+            WATCHDOG_TIMEOUT = 300
+    except (ValueError, TypeError):
+        WATCHDOG_TIMEOUT = 300
+
+    try:
+        KEEPALIVE_INTERVAL = int(os.environ.get('BBS_KEEPALIVE_INTERVAL', 120))
+        if KEEPALIVE_INTERVAL <= 0:
+            logging.warning("BBS_KEEPALIVE_INTERVAL must be positive. Falling back to default (120).")
+            KEEPALIVE_INTERVAL = 120
+    except (ValueError, TypeError):
+        KEEPALIVE_INTERVAL = 120
+    
+    logging.info(f"Watchdog timeout: {WATCHDOG_TIMEOUT}s, Keepalive interval: {KEEPALIVE_INTERVAL}s")
+
+    # Track last received packet for a deep health check (protected by last_rx_lock)
+    last_rx_time = time.time()
 
     try:
         while True:
@@ -123,6 +146,9 @@ def main():
                 interface.allowed_nodes = system_config['allowed_nodes']
 
                 def receive_packet(packet, interface=interface):
+                    nonlocal last_rx_time
+                    with last_rx_lock:
+                        last_rx_time = time.time()
                     on_receive(packet, interface)
 
                 pub.subscribe(receive_packet, system_config['mqtt_topic'])
@@ -144,9 +170,18 @@ def main():
                             js8_thread.start()
 
                 logging.info("Connected to Meshtastic interface.")
+                
+                # Reset RX time on successful connection to avoid immediate watchdog trigger
+                with last_rx_lock:
+                    last_rx_time = time.time()
+                
+                # Throttle keepalive traffic to avoid storms
+                last_keepalive_sent = 0
 
                 # Main wait loop - monitoring connection if possible
                 while True:
+                    now = time.time()
+                    
                     # 1. Aggressive socket watchdog for TCP interfaces
                     if system_config['interface_type'] == 'tcp' and hasattr(interface, 'socket') and interface.socket:
                         try:
@@ -154,11 +189,10 @@ def main():
                             interface.socket.getpeername()
                         except OSError:
                             logging.warning("Detected disconnected socket in underlying TCP watchdog.")
-                            # Force back-off before retry loop cleanup
                             should_sleep = True
                             break
 
-                    # 2. Regular interface connectivity check
+                    # 2. Public connectivity check
                     is_conn = True
                     if hasattr(interface, 'isConnected'):
                         conn_status = interface.isConnected
@@ -168,15 +202,49 @@ def main():
                             is_conn = conn_status()
                         else:
                             is_conn = bool(conn_status)
+                    
+                    # Deriving reader_alive from public is_conn indicator
+                    reader_alive = is_conn
 
                     if not is_conn:
-                        logging.error("Meshtastic interface disconnected.")
-                        # Force back-off before retry loop cleanup
+                        logging.error("Meshtastic interface reports disconnected.")
                         should_sleep = True
                         break
 
-                    # 3. Heartbeat update (only reached if watchdogs and connectivity checks pass)
-                    write_atomic_heartbeat(heartbeat_path, f"{time.time()}|CONNECTED")
+                    # 3. Packet receive watchdog and Keepalive
+                    with last_rx_lock:
+                        current_last_rx = last_rx_time
+                    
+                    rx_delta = now - current_last_rx
+                    
+                    if rx_delta > WATCHDOG_TIMEOUT:
+                        logging.warning(f"No packets received for {int(rx_delta)}s. Forcing reconnect.")
+                        should_sleep = True
+                        break
+                    elif rx_delta > KEEPALIVE_INTERVAL and (now - last_keepalive_sent) > KEEPALIVE_INTERVAL:
+                        # Generate keepalive traffic to maintain connection on quiet meshes
+                        # Querying a remote node ID if available to trigger network I/O
+                        try:
+                            logging.debug("Mesh quiet, generating keepalive traffic...")
+                            target_node = interface.myInfo.my_node_id
+                            if interface.bbs_nodes:
+                                # Use a known remote BBS node
+                                target_node = interface.bbs_nodes[0]
+                            elif hasattr(interface, 'nodes') and interface.nodes:
+                                # Use any known remote node
+                                for nid in interface.nodes:
+                                    if nid != interface.myInfo.my_node_id:
+                                        target_node = nid
+                                        break
+                            
+                            interface.getNode(target_node)
+                            last_keepalive_sent = now
+                        except Exception as e:
+                            logging.debug(f"Keepalive traffic failed: {e}")
+
+                    # 4. Heartbeat update
+                    # Format: TIMESTAMP|STATUS|READER_ALIVE|LAST_RX_TIME
+                    write_atomic_heartbeat(heartbeat_path, f"{now}|CONNECTED|{reader_alive}|{current_last_rx}")
                     
                     time.sleep(5)
 
@@ -206,7 +274,9 @@ def main():
                     interface = None # Ensure reference is cleared for next iteration or shutdown
                 
                 # Update heartbeat to reflect state during back-off/reconnection
-                write_atomic_heartbeat(heartbeat_path, f"{time.time()}|DISCONNECTED")
+                with last_rx_lock:
+                    reported_last_rx = last_rx_time
+                write_atomic_heartbeat(heartbeat_path, f"{time.time()}|DISCONNECTED|False|{reported_last_rx}")
 
                 if should_sleep:
                     logging.info("Waiting 10 seconds before reconnection attempt...")
