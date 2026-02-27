@@ -153,8 +153,8 @@ def delete_mail(unique_id, recipient_id, bbs_nodes, interface):
         conn.commit()
         send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, interface)
         logger.info(f"Mail with unique_id: {unique_id} deleted and sync message sent.")
-    except Exception as e:
-        logger.error(f"Error deleting mail with unique_id {unique_id}: {e}")
+    except Exception:
+        logger.exception(f"Error deleting mail with unique_id {unique_id}")
         raise
 
 
