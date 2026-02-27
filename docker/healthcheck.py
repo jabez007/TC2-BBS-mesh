@@ -55,10 +55,13 @@ def check_meshtastic_connection(host="localhost", port=4403):
         # 3. Try to read response to ensure bidirectional communication works
         s.settimeout(2)
         response = s.recv(1024)
+        if not response:
+            return True, "Radio busy (connection closed by peer)"
+            
         if len(response) >= 2 and response[0] == 0x94 and response[1] == 0xc3:
             return True, "Handshake successful"
         else:
-            return False, "Invalid radio response"
+            return False, f"Invalid radio response: {response.hex()}"
             
     except ConnectionRefusedError:
         # This is expected if the radio only allows one connection and the BBS is connected
