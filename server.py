@@ -41,7 +41,7 @@ logging.basicConfig(
 # JS8Call logging
 js8call_logger = logging.getLogger('js8call')
 js8call_logger.setLevel(logging.DEBUG)
-js8call_logger.propagate = True # Ensure messages reach the root logger/console
+js8call_logger.propagate = False # Prevent duplicate logs by stopping propagation to root logger
 js8call_handler = logging.StreamHandler()
 js8call_handler.setLevel(logging.DEBUG)
 js8call_formatter = logging.Formatter('%(asctime)s - JS8Call - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S')

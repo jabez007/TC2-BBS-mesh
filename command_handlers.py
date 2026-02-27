@@ -203,7 +203,7 @@ def handle_bb_steps(sender_id, message, step, state, interface, bbs_nodes):
             if board_name.lower() == 'urgent':
                 node_id = get_node_id_from_num(sender_id, interface)
                 allowed_nodes = interface.allowed_nodes
-                logger.info(f"Checking permissions for node_id: {node_id} with allowed_nodes: {allowed_nodes}")  # Debug statement
+                logger.debug(f"Checking permissions for node_id: {node_id} against {len(allowed_nodes) if allowed_nodes else 0} allowed nodes")
                 if allowed_nodes and node_id not in allowed_nodes:
                     send_message("You don't have permission to post to this board.", sender_id, interface)
                     handle_bb_steps(sender_id, 'e', 1, state, interface, bbs_nodes)
