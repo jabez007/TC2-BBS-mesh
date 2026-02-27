@@ -246,7 +246,7 @@ def _process_received_packet(packet, interface):
                                                       interface) if to_id else "Group Chat"
             
             logger.info(f"Received message from user '{sender_short_name}' ({sender_node_id}) to {receiver_short_name}")
-            logger.debug(f"Message content: {message_string[:50]}...") # Truncated content for debug only
+            logger.debug(f"Message content: {message_string[:50]}{'...' if len(message_string) > 50 else ''}") # Truncated content for debug only
 
             bbs_nodes = interface.bbs_nodes
             is_sync_message = any(message_string.startswith(prefix) for prefix in

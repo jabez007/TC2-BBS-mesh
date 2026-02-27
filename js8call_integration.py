@@ -8,6 +8,8 @@ import os
 import codecs
 from contextlib import closing
 
+logger = logging.getLogger(__name__)
+
 from meshtastic import BROADCAST_NUM
 
 from command_handlers import handle_help_command
@@ -372,7 +374,7 @@ def handle_group_messages_command(sender_id, interface):
             send_message("No group messages available.", sender_id, interface)
             handle_js8call_command(sender_id, interface)
     except Exception:
-        logging.exception("Error in handle_group_messages_command")
+        logger.exception("Error in handle_group_messages_command")
         send_message("Error retrieving group messages.", sender_id, interface)
         handle_js8call_command(sender_id, interface)
 
@@ -393,7 +395,7 @@ def handle_station_messages_command(sender_id, interface):
             send_message("No station messages available.", sender_id, interface)
         handle_js8call_command(sender_id, interface)
     except Exception:
-        logging.exception("Error in handle_station_messages_command")
+        logger.exception("Error in handle_station_messages_command")
         send_message("Error retrieving station messages.", sender_id, interface)
         handle_js8call_command(sender_id, interface)
 
@@ -414,7 +416,7 @@ def handle_urgent_messages_command(sender_id, interface):
             send_message("No urgent messages available.", sender_id, interface)
         handle_js8call_command(sender_id, interface)
     except Exception:
-        logging.exception("Error in handle_urgent_messages_command")
+        logger.exception("Error in handle_urgent_messages_command")
         send_message("Error retrieving urgent messages.", sender_id, interface)
         handle_js8call_command(sender_id, interface)
 
@@ -450,6 +452,6 @@ def handle_group_message_selection(sender_id, message, _step, state, interface):
         
         handle_js8call_command(sender_id, interface)
     except Exception:
-        logging.exception("Error fetching group messages")
+        logger.exception("Error fetching group messages")
         send_message("An error occurred while fetching messages.", sender_id, interface)
         handle_group_messages_command(sender_id, interface)

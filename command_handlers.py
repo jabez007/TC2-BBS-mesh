@@ -449,8 +449,8 @@ def handle_send_mail_command(sender_id, message, interface, bbs_nodes):
         notification_message = f"You have a new mail message from {sender_short_name}. Check your mailbox by responding to this message with CM."
         send_message(notification_message, recipient_id, interface)
 
-    except Exception as e:
-        logger.error(f"Error processing send mail command: {e}")
+    except Exception:
+        logger.exception("Error processing send mail command")
         send_message("Error processing send mail command.", sender_id, interface)
 
 
@@ -470,8 +470,8 @@ def handle_check_mail_command(sender_id, interface):
 
         update_user_state(sender_id, {'command': 'CHECK_MAIL', 'step': 1, 'mail': mail})
 
-    except Exception as e:
-        logging.error(f"Error processing check mail command: {e}")
+    except Exception:
+        logger.exception("Error processing check mail command")
         send_message("Error processing check mail command.", sender_id, interface)
 
 
@@ -494,8 +494,8 @@ def handle_read_mail_command(sender_id, message, state, interface):
 
     except ValueError:
         send_message("Invalid input. Please enter a valid message number.", sender_id, interface)
-    except Exception as e:
-        logging.error(f"Error processing read mail command: {e}")
+    except Exception:
+        logger.exception("Error processing read mail command")
         send_message("Error processing read mail command.", sender_id, interface)
 
 
@@ -519,8 +519,8 @@ def handle_delete_mail_confirmation(sender_id, message, state, interface, bbs_no
             send_message("The message has been kept in your inbox.✉️", sender_id, interface)
             update_user_state(sender_id, None)
 
-    except Exception as e:
-        logging.error(f"Error processing delete mail confirmation: {e}")
+    except Exception:
+        logger.exception("Error processing delete mail confirmation")
         send_message("Error processing delete mail confirmation.", sender_id, interface)
 
 
@@ -539,8 +539,8 @@ def handle_post_bulletin_command(sender_id, message, interface, bbs_nodes):
         send_message(f"Your bulletin '{subject}' has been posted to {board_name}.", sender_id, interface)
 
 
-    except Exception as e:
-        logging.error(f"Error processing post bulletin command: {e}")
+    except Exception:
+        logger.exception("Error processing post bulletin command")
         send_message("Error processing post bulletin command.", sender_id, interface)
 
 
@@ -580,8 +580,8 @@ def handle_check_bulletin_command(sender_id, message, interface):
 
         update_user_state(sender_id, {'command': 'CHECK_BULLETIN', 'step': 1, 'board_name': board_name, 'bulletins': bulletins})
 
-    except Exception as e:
-        logging.error(f"Error processing check bulletin command: {e}")
+    except Exception:
+        logger.exception("Error processing check bulletin command")
         send_message("Error processing check bulletin command.", sender_id, interface)
 
 def handle_read_bulletin_command(sender_id, message, state, interface):
@@ -602,8 +602,8 @@ def handle_read_bulletin_command(sender_id, message, state, interface):
 
     except ValueError:
         send_message("Invalid input. Please enter a valid bulletin number.", sender_id, interface)
-    except Exception as e:
-        logging.error(f"Error processing read bulletin command: {e}")
+    except Exception:
+        logger.exception("Error processing read bulletin command")
         send_message("Error processing read bulletin command.", sender_id, interface)
 
 
@@ -619,8 +619,8 @@ def handle_post_channel_command(sender_id, message, interface):
         add_channel(channel_name, channel_url, bbs_nodes, interface)
         send_message(f"Channel '{channel_name}' has been added to the directory.", sender_id, interface)
 
-    except Exception as e:
-        logging.error(f"Error processing post channel command: {e}")
+    except Exception:
+        logger.exception("Error processing post channel command")
         send_message("Error processing post channel command.", sender_id, interface)
 
 
@@ -639,8 +639,8 @@ def handle_check_channel_command(sender_id, interface):
 
         update_user_state(sender_id, {'command': 'CHECK_CHANNEL', 'step': 1, 'channels': channels})
 
-    except Exception as e:
-        logging.error(f"Error processing check channel command: {e}")
+    except Exception:
+        logger.exception("Error processing check channel command")
         send_message("Error processing check channel command.", sender_id, interface)
 
 
@@ -661,8 +661,8 @@ def handle_read_channel_command(sender_id, message, state, interface):
 
     except ValueError:
         send_message("Invalid input. Please enter a valid channel number.", sender_id, interface)
-    except Exception as e:
-        logging.error(f"Error processing read channel command: {e}")
+    except Exception:
+        logger.exception("Error processing read channel command")
         send_message("Error processing read channel command.", sender_id, interface)
 
 
@@ -681,8 +681,8 @@ def handle_list_channels_command(sender_id, interface):
 
         update_user_state(sender_id, {'command': 'LIST_CHANNELS', 'step': 1, 'channels': channels})
 
-    except Exception as e:
-        logging.error(f"Error processing list channels command: {e}")
+    except Exception:
+        logger.exception("Error processing list channels command")
         send_message("Error processing list channels command.", sender_id, interface)
 
 
