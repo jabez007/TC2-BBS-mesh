@@ -54,7 +54,7 @@ class JS8CallClient:
     def __init__(self, interface, logger=None):
         self.logger = logger or logging.getLogger('js8call')
         self.logger.setLevel(logging.INFO)
-        self.logger.propagate = False
+        self.logger.propagate = True
 
         self.config = configparser.ConfigParser()
         # Ensure we read from the same resolved config path as the helper

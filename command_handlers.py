@@ -3,6 +3,8 @@ import logging
 import random
 import time
 
+logger = logging.getLogger(__name__)
+
 from meshtastic import BROADCAST_NUM
 
 from db_operations import (
@@ -201,7 +203,7 @@ def handle_bb_steps(sender_id, message, step, state, interface, bbs_nodes):
             if board_name.lower() == 'urgent':
                 node_id = get_node_id_from_num(sender_id, interface)
                 allowed_nodes = interface.allowed_nodes
-                logging.info(f"Checking permissions for node_id: {node_id} with allowed_nodes: {allowed_nodes}")  # Debug statement
+                logger.info(f"Checking permissions for node_id: {node_id} with allowed_nodes: {allowed_nodes}")  # Debug statement
                 if allowed_nodes and node_id not in allowed_nodes:
                     send_message("You don't have permission to post to this board.", sender_id, interface)
                     handle_bb_steps(sender_id, 'e', 1, state, interface, bbs_nodes)
@@ -275,7 +277,7 @@ def handle_mail_steps(sender_id, message, step, state, interface, bbs_nodes):
             send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, interface)
             update_user_state(sender_id, {'command': 'MAIL', 'step': 4, 'mail_id': mail_id, 'unique_id': unique_id, 'sender': sender, 'subject': subject, 'content': content})
         except TypeError:
-            logging.info(f"Node {sender_id} tried to access non-existent message")
+            logger.info(f"Node {sender_id} tried to access non-existent message")
             send_message("Mail not found", sender_id, interface)
             update_user_state(sender_id, None)
 
@@ -448,7 +450,7 @@ def handle_send_mail_command(sender_id, message, interface, bbs_nodes):
         send_message(notification_message, recipient_id, interface)
 
     except Exception as e:
-        logging.error(f"Error processing send mail command: {e}")
+        logger.error(f"Error processing send mail command: {e}")
         send_message("Error processing send mail command.", sender_id, interface)
 
 

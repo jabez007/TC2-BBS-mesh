@@ -2,6 +2,8 @@ import logging
 import threading
 import time
 
+logger = logging.getLogger(__name__)
+
 user_states = {}
 user_states_lock = threading.Lock()
 
@@ -29,16 +31,16 @@ def send_message(message, destination, interface):
             )
             destid = get_node_id_from_num(destination, interface)
             chunk = chunk.replace('\n', '\\n')
-            logging.info(f"Sending message to user '{get_node_short_name(destid, interface)}' ({destid}) with sendID {d.id}: \"{chunk}\"")
+            logger.info(f"Sending message to user '{get_node_short_name(destid, interface)}' ({destid}) with sendID {d.id}: \"{chunk}\"")
         except OSError:
-            logging.exception("CONNECTION ERROR during send. Closing interface to trigger reconnect.")
+            logger.exception("CONNECTION ERROR during send. Closing interface to trigger reconnect.")
             try:
                 interface.close()
             except Exception as close_err:
-                logging.debug(f"Error closing interface: {close_err}")
+                logger.debug(f"Error closing interface: {close_err}")
             return False # Return False to signal connection failure
         except Exception:
-            logging.exception("REPLY SEND ERROR")
+            logger.exception("REPLY SEND ERROR")
             return False # Return False on any other send error
         
         time.sleep(2)
@@ -76,7 +78,7 @@ def send_bulletin_to_bbs_nodes(board, sender_short_name, subject, content, uniqu
 def send_mail_to_bbs_nodes(sender_id, sender_short_name, recipient_id, subject, content, unique_id, bbs_nodes,
                            interface):
     message = f"MAIL|{sender_id}|{sender_short_name}|{recipient_id}|{subject}|{content}|{unique_id}"
-    logging.info(f"SERVER SYNC: Syncing new mail message {subject} sent from {sender_short_name} to other BBS systems.")
+    logger.info(f"SERVER SYNC: Syncing new mail message {subject} sent from {sender_short_name} to other BBS systems.")
     for node_id in bbs_nodes:
         if not send_message(message, node_id, interface):
             break
@@ -91,7 +93,7 @@ def send_delete_bulletin_to_bbs_nodes(bulletin_id, bbs_nodes, interface):
 
 def send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, interface):
     message = f"DELETE_MAIL|{unique_id}"
-    logging.info(f"SERVER SYNC: Sending delete mail sync message with unique_id: {unique_id}")
+    logger.info(f"SERVER SYNC: Sending delete mail sync message with unique_id: {unique_id}")
     for node_id in bbs_nodes:
         if not send_message(message, node_id, interface):
             break

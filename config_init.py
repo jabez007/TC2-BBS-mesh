@@ -9,6 +9,8 @@ import meshtastic.tcp_interface
 import serial.tools.list_ports
 import argparse
 
+logger = logging.getLogger(__name__)
+
 
 def init_cli_parser() -> argparse.Namespace:
     """Function build the CLI parser and parses the arguments.
@@ -189,9 +191,9 @@ def get_interface(system_config:dict[str, Any]) -> meshtastic.stream_interface.S
                 # Close after 3 failed probes
                 if hasattr(socket, 'TCP_KEEPCNT'):
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
-                logging.info("TCP Keep-Alive enabled for Meshtastic interface.")
+                logger.info("TCP Keep-Alive enabled for Meshtastic interface.")
             except (AttributeError, OSError) as e:
-                logging.debug(f"Could not set TCP Keep-Alive: {e}")
+                logger.debug(f"Could not set TCP Keep-Alive: {e}")
         return interface
     else:
         raise ValueError("Invalid interface type specified in config file")
