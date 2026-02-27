@@ -262,8 +262,8 @@ def main():
 
                 # 2. Before closing the interface, stop the message processing executor
                 # so no background tasks try to use the closed interface.
-                # wait=True ensures in-flight tasks finish before we close interface.
-                shutdown_executor(wait=True, cancel_futures=True)
+                # we use wait=False here to avoid deadlocking if a background task is stuck on a broken interface
+                shutdown_executor(wait=False, cancel_futures=True)
 
                 # 3. Finally close the hardware interface
                 if interface:

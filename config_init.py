@@ -1,5 +1,7 @@
 import configparser
 import time
+import socket
+import logging
 from typing import Any
 import meshtastic.stream_interface
 import meshtastic.serial_interface
@@ -170,6 +172,26 @@ def get_interface(system_config:dict[str, Any]) -> meshtastic.stream_interface.S
     elif system_config['interface_type'] == 'tcp':
         if not system_config['hostname']:
             raise ValueError("Hostname must be specified for TCP interface")
-        return meshtastic.tcp_interface.TCPInterface(hostname=system_config['hostname'])
+        interface = meshtastic.tcp_interface.TCPInterface(hostname=system_config['hostname'])
+        
+        # Configure TCP Keep-Alive to prevent WiFi/NAT timeouts
+        if hasattr(interface, 'socket') and interface.socket:
+            try:
+                sock = interface.socket
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                # Note: TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT are Linux-specific but likely available on Raspberry Pi (Linux)
+                # Send probes after 60 seconds of inactivity
+                if hasattr(socket, 'TCP_KEEPIDLE'):
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
+                # Probe every 10 seconds
+                if hasattr(socket, 'TCP_KEEPINTVL'):
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+                # Close after 3 failed probes
+                if hasattr(socket, 'TCP_KEEPCNT'):
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+                logging.info("TCP Keep-Alive enabled for Meshtastic interface.")
+            except (AttributeError, OSError) as e:
+                logging.debug(f"Could not set TCP Keep-Alive: {e}")
+        return interface
     else:
         raise ValueError("Invalid interface type specified in config file")
