@@ -17,8 +17,8 @@ def set_db_path(path):
     if hasattr(thread_local, 'connection') and thread_local.connection:
         try:
             thread_local.connection.close()
-        except:
-            pass
+        except Exception:
+            logger.exception("Error closing database connection during path change")
         thread_local.connection = None
 
 def get_db_path():
@@ -75,7 +75,7 @@ def initialize_database():
                     date TEXT NOT NULL,
                     subject TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    unique_id TEXT NOT NULL
+                    unique_id TEXT NOT NULL UNIQUE
                 )''')
     c.execute('''CREATE TABLE IF NOT EXISTS mesh_mail (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,7 +85,7 @@ def initialize_database():
                     date TEXT NOT NULL,
                     subject TEXT NOT NULL,
                     content TEXT NOT NULL,
-                    unique_id TEXT NOT NULL
+                    unique_id TEXT NOT NULL UNIQUE
                 )''')
     c.execute('''CREATE TABLE IF NOT EXISTS mesh_channels (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

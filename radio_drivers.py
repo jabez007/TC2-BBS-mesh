@@ -1,36 +1,44 @@
 import logging
+import abc
 
 logger = logging.getLogger(__name__)
 
 
-class BaseRadioDriver:
+class BaseRadioDriver(abc.ABC):
     """
     Abstract base class for all radio interfaces (Meshtastic, Mesh Core, etc.)
     """
 
+    @abc.abstractmethod
     def send_text(self, text, destination_id, want_ack=True):
         raise NotImplementedError
 
+    @abc.abstractmethod
     def get_nodes(self):
         """Returns a dictionary of nodes keyed by node_id"""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def get_node_by_num(self, node_num):
         """Returns a node object based on its numeric ID"""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def get_my_node_id(self):
         """Returns the ID of the local radio node"""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def get_my_node_num(self):
         """Returns the numeric ID of the local radio node"""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def get_short_name(self, node_id):
         """Returns the short name of a node"""
         raise NotImplementedError
 
+    @abc.abstractmethod
     def close(self):
         """Closes the radio interface"""
         raise NotImplementedError
@@ -69,7 +77,7 @@ class MeshtasticDriver(BaseRadioDriver):
         return self.interface.nodes
 
     def get_node_by_num(self, node_num):
-        for node_id, node in self.interface.nodes.items():
+        for _, node in self.interface.nodes.items():
             if node["num"] == node_num:
                 return node
         return None

@@ -320,6 +320,11 @@ def handle_group_messages_command(sender_id, driver):
     try:
         groups = []
         conn = get_db_connection()
+        if not conn:
+            logger.error("Database connection failed.")
+            send_message("Database error occurred.", sender_id, driver)
+            handle_js8call_command(sender_id, driver)
+            return
         c = conn.cursor()
         c.execute("SELECT DISTINCT groupname FROM ham_groups ORDER BY groupname ASC")
         groups = c.fetchall()
@@ -345,6 +350,11 @@ def handle_station_messages_command(sender_id, driver):
     try:
         messages = []
         conn = get_db_connection()
+        if not conn:
+            logger.error("Database connection failed.")
+            send_message("Database error occurred.", sender_id, driver)
+            handle_js8call_command(sender_id, driver)
+            return
         c = conn.cursor()
         # Order by most recent and limit to prevent oversized responses
         c.execute(
@@ -374,6 +384,11 @@ def handle_urgent_messages_command(sender_id, driver):
     try:
         messages = []
         conn = get_db_connection()
+        if not conn:
+            logger.error("Database connection failed.")
+            send_message("Database error occurred.", sender_id, driver)
+            handle_js8call_command(sender_id, driver)
+            return
         c = conn.cursor()
         # Order by most recent and limit to prevent oversized responses
         c.execute(
@@ -420,6 +435,11 @@ def handle_group_message_selection(sender_id, message, _step, state, driver):
     try:
         messages = []
         conn = get_db_connection()
+        if not conn:
+            logger.error("Database connection failed.")
+            send_message("Database error occurred.", sender_id, driver)
+            handle_js8call_command(sender_id, driver)
+            return
         c = conn.cursor()
         # Limit results
         c.execute(

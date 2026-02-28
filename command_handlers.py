@@ -63,6 +63,12 @@ def handle_help_command(sender_id, driver, menu_name=None):
             response = build_menu(bbs_menu_items, "📰BBS Menu📰")
         elif menu_name == 'utilities':
             response = build_menu(utilities_menu_items, "🛠️Utilities Menu🛠️")
+        else:
+            logger.warning(f"Unknown menu requested: {menu_name}")
+            response = "Invalid menu selection. Returning to main menu."
+            update_user_state(sender_id, {'command': 'MAIN_MENU', 'step': 1})
+            mail = get_mail(get_node_id_from_num(sender_id, driver))
+            response += "\n" + build_menu(main_menu_items, f"💾TC² BBS💾 (✉️:{len(mail)})")
     else:
         update_user_state(sender_id, {'command': 'MAIN_MENU', 'step': 1})  # Reset to main menu state
         mail = get_mail(get_node_id_from_num(sender_id, driver))
@@ -165,19 +171,26 @@ def handle_stats_steps(sender_id, message, step, driver):
 
 def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
     boards = {0: "General", 1: "Info", 2: "News", 3: "Urgent"}
+    # Letter to ID mapping
+    board_map = {'g': 0, 'i': 1, 'n': 2, 'u': 3}
+    
     if step == 1:
-        if message.lower() == 'e':
+        msg_lower = message.lower().strip()
+        if msg_lower == 'e':
             handle_help_command(sender_id, driver, 'bbs')
             return
-        try:
-            board_index = int(message)
-        except ValueError:
-            send_message("Invalid input. Please enter a valid board number.", sender_id, driver)
-            handle_bulletin_command(sender_id, driver)
-            return
+            
+        board_index = None
+        if msg_lower in board_map:
+            board_index = board_map[msg_lower]
+        else:
+            try:
+                board_index = int(msg_lower)
+            except ValueError:
+                pass
 
-        if board_index not in boards:
-            send_message("Invalid board selection. Please choose a valid number.", sender_id, driver)
+        if board_index is None or board_index not in boards:
+            send_message("Invalid board selection. Please choose a letter [G,I,N,U] or number [0-3].", sender_id, driver)
             handle_bulletin_command(sender_id, driver)
             return
             
@@ -212,9 +225,17 @@ def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
             update_user_state(sender_id, {'command': 'BULLETIN_POST', 'step': 4, 'board': board_name})
 
     elif step == 3:
-        bulletin_id = int(message)
-        sender_short_name, date, subject, content, unique_id = get_bulletin_content(bulletin_id)
-        send_message(f"From: {sender_short_name}\nDate: {date}\nSubject: {subject}\n- - - - - - -\n{content}", sender_id, driver)
+        try:
+            bulletin_id = int(message)
+            content_data = get_bulletin_content(bulletin_id)
+            if content_data:
+                sender_short_name, date, subject, content, unique_id = content_data
+                send_message(f"From: {sender_short_name}\nDate: {date}\nSubject: {subject}\n- - - - - - -\n{content}", sender_id, driver)
+            else:
+                send_message("Bulletin not found.", sender_id, driver)
+        except (ValueError, TypeError):
+            send_message("Invalid bulletin selection.", sender_id, driver)
+            
         board_name = state['board']
         handle_bb_steps(sender_id, 'e', 1, state, driver, bbs_nodes)
 
@@ -269,15 +290,20 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             handle_help_command(sender_id, driver)
 
     elif step == 2:
-        mail_id = int(message)
         try:
+            mail_id = int(message)
             sender_node_id = get_node_id_from_num(sender_id, driver)
-            sender, date, subject, content, unique_id = get_mail_content(mail_id, sender_node_id)
-            send_message(f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n{content}", sender_id, driver)
-            send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
-            update_user_state(sender_id, {'command': 'MAIL', 'step': 4, 'mail_id': mail_id, 'unique_id': unique_id, 'sender': sender, 'subject': subject, 'content': content})
-        except TypeError:
-            logger.info(f"Node {sender_id} tried to access non-existent message")
+            mail_data = get_mail_content(mail_id, sender_node_id)
+            if mail_data:
+                sender, date, subject, content, unique_id = mail_data
+                send_message(f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n{content}", sender_id, driver)
+                send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
+                update_user_state(sender_id, {'command': 'MAIL', 'step': 4, 'mail_id': mail_id, 'unique_id': unique_id, 'sender': sender, 'subject': subject, 'content': content})
+            else:
+                send_message("Mail not found", sender_id, driver)
+                update_user_state(sender_id, None)
+        except (ValueError, TypeError, IndexError):
+            logger.info(f"Node {sender_id} provided invalid mail ID: {message}")
             send_message("Mail not found", sender_id, driver)
             update_user_state(sender_id, None)
 
@@ -401,11 +427,17 @@ def handle_channel_directory_steps(sender_id, message, step, state, driver):
             update_user_state(sender_id, {'command': 'CHANNEL_DIRECTORY', 'step': 3})
 
     elif step == 2:
-        channel_index = int(message)
-        channels = get_channels()
-        if 0 <= channel_index < len(channels):
-            channel_name, channel_url = channels[channel_index]
-            send_message(f"Channel Name: {channel_name}\nChannel URL:\n{channel_url}", sender_id, driver)
+        try:
+            channel_index = int(message)
+            channels = get_channels()
+            if 0 <= channel_index < len(channels):
+                channel_name, channel_url = channels[channel_index]
+                send_message(f"Channel Name: {channel_name}\nChannel URL:\n{channel_url}", sender_id, driver)
+            else:
+                send_message("Invalid selection. Please choose a channel from the list.", sender_id, driver)
+        except ValueError:
+            send_message("Please enter a valid channel number.", sender_id, driver)
+            
         handle_channel_directory_command(sender_id, driver)
 
     elif step == 3:
@@ -416,7 +448,8 @@ def handle_channel_directory_steps(sender_id, message, step, state, driver):
     elif step == 4:
         channel_url = message
         channel_name = state['channel_name']
-        add_channel(channel_name, channel_url)
+        bbs_nodes = getattr(driver, 'bbs_nodes', [])
+        add_channel(channel_name, channel_url, bbs_nodes, driver)
         send_message(f"Your channel '{channel_name}' has been added to the directory.", sender_id, driver)
         handle_channel_directory_command(sender_id, driver)
 
@@ -609,13 +642,13 @@ def handle_read_bulletin_command(sender_id, message, state, driver):
 
 def handle_post_channel_command(sender_id, message, driver):
     try:
-        parts = message.split("|", 3)
+        parts = message.split(",,", 2)
         if len(parts) != 3:
             send_message("Post Channel Quick Command format:\nCHP,,{channel_name},,{channel_url}", sender_id, driver)
             return
 
         _, channel_name, channel_url = parts
-        bbs_nodes = driver.bbs_nodes
+        bbs_nodes = getattr(driver, 'bbs_nodes', [])
         add_channel(channel_name, channel_url, bbs_nodes, driver)
         send_message(f"Channel '{channel_name}' has been added to the directory.", sender_id, driver)
 

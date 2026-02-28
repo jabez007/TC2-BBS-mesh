@@ -143,60 +143,80 @@ def process_message(sender_id, message, driver, is_sync_message=False):
         message_lower = message_lower[0]
 
     if is_sync_message:
-        if message.startswith("BULLETIN|"):
-            parts = message.split("|")
-            board, sender_short_name, subject, content, unique_id = (
-                parts[1],
-                parts[2],
-                parts[3],
-                parts[4],
-                parts[5],
-            )
-            add_bulletin(
-                board,
-                sender_short_name,
-                subject,
-                content,
-                [],
-                driver,
-                unique_id=unique_id,
-            )
+        try:
+            if message.startswith("BULLETIN|"):
+                parts = message.split("|")
+                if len(parts) < 6:
+                    logger.warning(f"Malformed BULLETIN sync message: {message}")
+                    return
+                board, sender_short_name, subject, content, unique_id = (
+                    parts[1],
+                    parts[2],
+                    parts[3],
+                    parts[4],
+                    parts[5],
+                )
+                add_bulletin(
+                    board,
+                    sender_short_name,
+                    subject,
+                    content,
+                    [],
+                    driver,
+                    unique_id=unique_id,
+                )
 
-            if board.lower() == "urgent":
-                notification_message = f"💥NEW URGENT BULLETIN💥\nFrom: {sender_short_name}\nTitle: {subject}\nDM 'CB,,Urgent' to view"
-                send_message(notification_message, BROADCAST_NUM, driver)
-        elif message.startswith("MAIL|"):
-            parts = message.split("|")
-            sender_id, sender_short_name, recipient_id, subject, content, unique_id = (
-                parts[1],
-                parts[2],
-                parts[3],
-                parts[4],
-                parts[5],
-                parts[6],
-            )
-            add_mail(
-                sender_id,
-                sender_short_name,
-                recipient_id,
-                subject,
-                content,
-                [],
-                driver,
-                unique_id=unique_id,
-            )
-        elif message.startswith("DELETE_BULLETIN|"):
-            unique_id = message.split("|")[1]
-            delete_bulletin(unique_id, [], driver)
-        elif message.startswith("DELETE_MAIL|"):
-            unique_id = message.split("|")[1]
-            logger.info(f"Processing delete mail with unique_id: {unique_id}")
-            recipient_id = get_recipient_id_by_mail(unique_id)
-            delete_mail(unique_id, recipient_id, [], driver)
-        elif message.startswith("CHANNEL|"):
-            parts = message.split("|")
-            channel_name, channel_url = parts[1], parts[2]
-            add_channel(channel_name, channel_url)
+                if board.lower() == "urgent":
+                    notification_message = f"💥NEW URGENT BULLETIN💥\nFrom: {sender_short_name}\nTitle: {subject}\nDM 'CB,,Urgent' to view"
+                    send_message(notification_message, BROADCAST_NUM, driver)
+            elif message.startswith("MAIL|"):
+                parts = message.split("|")
+                if len(parts) < 7:
+                    logger.warning(f"Malformed MAIL sync message: {message}")
+                    return
+                sender_id, sender_short_name, recipient_id, subject, content, unique_id = (
+                    parts[1],
+                    parts[2],
+                    parts[3],
+                    parts[4],
+                    parts[5],
+                    parts[6],
+                )
+                add_mail(
+                    sender_id,
+                    sender_short_name,
+                    recipient_id,
+                    subject,
+                    content,
+                    [],
+                    driver,
+                    unique_id=unique_id,
+                )
+            elif message.startswith("DELETE_BULLETIN|"):
+                parts = message.split("|")
+                if len(parts) < 2:
+                    logger.warning(f"Malformed DELETE_BULLETIN sync message: {message}")
+                    return
+                unique_id = parts[1]
+                delete_bulletin(unique_id, [], driver)
+            elif message.startswith("DELETE_MAIL|"):
+                parts = message.split("|")
+                if len(parts) < 2:
+                    logger.warning(f"Malformed DELETE_MAIL sync message: {message}")
+                    return
+                unique_id = parts[1]
+                logger.info(f"Processing delete mail with unique_id: {unique_id}")
+                recipient_id = get_recipient_id_by_mail(unique_id)
+                delete_mail(unique_id, recipient_id, [], driver)
+            elif message.startswith("CHANNEL|"):
+                parts = message.split("|")
+                if len(parts) < 3:
+                    logger.warning(f"Malformed CHANNEL sync message: {message}")
+                    return
+                channel_name, channel_url = parts[1], parts[2]
+                add_channel(channel_name, channel_url)
+        except (IndexError, ValueError):
+            logger.warning(f"Error parsing sync message: {message}")
     else:
         if message_lower.startswith("sm,,"):
             handle_send_mail_command(sender_id, message_strip, driver, bbs_nodes)

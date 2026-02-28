@@ -71,80 +71,67 @@ def list_ham_messages():
     return messages
 
 
+def _delete_records(table_name, record_type, id_list_str):
+    if "X" in [id.strip().upper() for id in id_list_str.split(",")]:
+        print_bold("Deletion cancelled.")
+        print_separator()
+        return
+
+    raw_ids = [id.strip() for id in id_list_str.split(",") if id.strip()]
+    valid_ids = []
+    invalid_ids = []
+
+    for rid in raw_ids:
+        if rid.isdigit():
+            valid_ids.append(rid)
+        else:
+            invalid_ids.append(rid)
+
+    if invalid_ids:
+        print_bold(f"Skipping invalid (non-numeric) IDs: {', '.join(invalid_ids)}")
+
+    if not valid_ids:
+        print_bold("No valid IDs provided for deletion.")
+        print_separator()
+        return
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    deleted_count = 0
+    for record_id in valid_ids:
+        c.execute(f"DELETE FROM {table_name} WHERE id = ?", (record_id,))
+        if c.rowcount > 0:
+            deleted_count += 1
+    
+    conn.commit()
+    print_bold(f"Successfully deleted {deleted_count} {record_type}(s).")
+    if deleted_count < len(valid_ids):
+        print_bold(f"Note: {len(valid_ids) - deleted_count} ID(s) were not found in the database.")
+    print_separator()
+
 def delete_mesh_bulletin():
     bulletins = list_mesh_bulletins()
     if bulletins:
-        bulletin_ids = input_bold(
-            "Enter the mesh bulletin ID(s) to delete (comma-separated) or 'X' to cancel: "
-        ).split(",")
-        if "X" in [id.strip().upper() for id in bulletin_ids]:
-            print_bold("Deletion cancelled.")
-            print_separator()
-            return
-        conn = get_db_connection()
-        c = conn.cursor()
-        for bulletin_id in bulletin_ids:
-            c.execute("DELETE FROM mesh_bulletins WHERE id = ?", (bulletin_id.strip(),))
-        conn.commit()
-        print_bold(f"Mesh bulletin(s) with ID(s) {', '.join(bulletin_ids)} deleted.")
-        print_separator()
-
+        id_list_str = input_bold("Enter the mesh bulletin ID(s) to delete (comma-separated) or 'X' to cancel: ")
+        _delete_records("mesh_bulletins", "mesh bulletin", id_list_str)
 
 def delete_mesh_mail():
     mail = list_mesh_mail()
     if mail:
-        mail_ids = input_bold(
-            "Enter the mesh mail ID(s) to delete (comma-separated) or 'X' to cancel: "
-        ).split(",")
-        if "X" in [id.strip().upper() for id in mail_ids]:
-            print_bold("Deletion cancelled.")
-            print_separator()
-            return
-        conn = get_db_connection()
-        c = conn.cursor()
-        for mail_id in mail_ids:
-            c.execute("DELETE FROM mesh_mail WHERE id = ?", (mail_id.strip(),))
-        conn.commit()
-        print_bold(f"Mesh mail with ID(s) {', '.join(mail_ids)} deleted.")
-        print_separator()
-
+        id_list_str = input_bold("Enter the mesh mail ID(s) to delete (comma-separated) or 'X' to cancel: ")
+        _delete_records("mesh_mail", "mesh mail", id_list_str)
 
 def delete_mesh_channel():
     channels = list_mesh_channels()
     if channels:
-        channel_ids = input_bold(
-            "Enter the mesh channel ID(s) to delete (comma-separated) or 'X' to cancel: "
-        ).split(",")
-        if "X" in [id.strip().upper() for id in channel_ids]:
-            print_bold("Deletion cancelled.")
-            print_separator()
-            return
-        conn = get_db_connection()
-        c = conn.cursor()
-        for channel_id in channel_ids:
-            c.execute("DELETE FROM mesh_channels WHERE id = ?", (channel_id.strip(),))
-        conn.commit()
-        print_bold(f"Mesh channel(s) with ID(s) {', '.join(channel_ids)} deleted.")
-        print_separator()
-
+        id_list_str = input_bold("Enter the mesh channel ID(s) to delete (comma-separated) or 'X' to cancel: ")
+        _delete_records("mesh_channels", "mesh channel", id_list_str)
 
 def delete_ham_message():
     messages = list_ham_messages()
     if messages:
-        msg_ids = input_bold(
-            "Enter the ham message ID(s) to delete (comma-separated) or 'X' to cancel: "
-        ).split(",")
-        if "X" in [id.strip().upper() for id in msg_ids]:
-            print_bold("Deletion cancelled.")
-            print_separator()
-            return
-        conn = get_db_connection()
-        c = conn.cursor()
-        for msg_id in msg_ids:
-            c.execute("DELETE FROM ham_messages WHERE id = ?", (msg_id.strip(),))
-        conn.commit()
-        print_bold(f"Ham message(s) with ID(s) {', '.join(msg_ids)} deleted.")
-        print_separator()
+        id_list_str = input_bold("Enter the ham message ID(s) to delete (comma-separated) or 'X' to cancel: ")
+        _delete_records("ham_messages", "ham message", id_list_str)
 
 
 def display_menu():
