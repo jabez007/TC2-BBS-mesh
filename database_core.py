@@ -71,7 +71,7 @@ def get_db_connection():
         if getattr(thread_local, 'conn_version', -1) != _db_path_version:
             try:
                 thread_local.connection.close()
-            except Exception as e:
+            except sqlite3.Error as e:
                 logger.debug(f"Error closing stale connection: {e}")
             thread_local.connection = None
 
@@ -106,11 +106,11 @@ def close_db_connection():
 def _migrate_legacy_data(conn):
     """
     Migrates data from legacy table names to the new prefixed tables.
-    Uses a single transaction for atomicity.
     """
     cursor = conn.cursor()
     
     # Mapping of (legacy_table, new_table, columns)
+    # Note: These identifiers are hardcoded compile-time constants.
     migrations = [
         ('bulletins', 'mesh_bulletins', 'board, sender_short_name, date, subject, content, unique_id'),
         ('mail', 'mesh_mail', 'sender, sender_short_name, recipient, date, subject, content, unique_id'),
@@ -121,15 +121,15 @@ def _migrate_legacy_data(conn):
     ]
     
     try:
-        # Start transaction
-        cursor.execute("BEGIN")
-        
         migrated_any = False
         for old_table, new_table, cols in migrations:
             # Check if old table exists
             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'")
             if cursor.fetchone():
                 logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
+                
+                # Note: Table and column names are compile-time constants from the migrations list.
+                # SQLite does not support parameterized identifiers, so this pattern is intentional.
                 
                 # Deduplication strategy:
                 # 1. Mesh tables (mesh_bulletins, mesh_mail) have a UNIQUE(unique_id) constraint.
@@ -149,8 +149,6 @@ def _migrate_legacy_data(conn):
         if migrated_any:
             conn.commit()
             logger.info("Database migration completed successfully.")
-        else:
-            conn.rollback() # Nothing to do
             
     except sqlite3.Error:
         conn.rollback()
