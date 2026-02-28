@@ -6,6 +6,8 @@ import configparser
 
 logger = logging.getLogger(__name__)
 thread_local = threading.local()
+_connections = {}
+_connections_lock = threading.Lock()
 
 DEFAULT_DB_PATH = 'bbs.db'
 _custom_db_path = None
@@ -13,12 +15,17 @@ _custom_db_path = None
 def set_db_path(path):
     global _custom_db_path
     _custom_db_path = path
-    # Reset connection if path changes
-    if hasattr(thread_local, 'connection') and thread_local.connection:
-        try:
-            thread_local.connection.close()
-        except Exception:
-            logger.exception("Error closing database connection during path change")
+    # Close and clear all tracked connections
+    with _connections_lock:
+        for tid, conn in list(_connections.items()):
+            try:
+                conn.close()
+            except Exception:
+                logger.exception(f"Error closing tracked connection for thread {tid}")
+        _connections.clear()
+    
+    # Also clear for current thread if it exists
+    if hasattr(thread_local, 'connection'):
         thread_local.connection = None
 
 def get_db_path():
@@ -43,10 +50,14 @@ def get_db_connection():
     db_path = get_db_path()
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
         try:
-            thread_local.connection = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+            conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
             # Enable Write-Ahead Logging (WAL) for better concurrency
-            thread_local.connection.execute("PRAGMA journal_mode=WAL")
-            thread_local.connection.execute("PRAGMA synchronous=NORMAL")
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            
+            thread_local.connection = conn
+            with _connections_lock:
+                _connections[threading.get_ident()] = conn
         except sqlite3.Error:
             logger.exception(f"Failed to connect to database at {db_path}")
             return None
@@ -55,7 +66,10 @@ def get_db_connection():
 def close_db_connection():
     if hasattr(thread_local, 'connection') and thread_local.connection is not None:
         try:
-            thread_local.connection.close()
+            conn = thread_local.connection
+            conn.close()
+            with _connections_lock:
+                _connections.pop(threading.get_ident(), None)
         except sqlite3.Error:
             logger.exception("Error closing database connection")
         finally:
@@ -64,6 +78,7 @@ def close_db_connection():
 def _migrate_legacy_data(conn):
     """
     Migrates data from legacy table names to the new prefixed tables.
+    Uses a single transaction for atomicity.
     """
     cursor = conn.cursor()
     
@@ -77,8 +92,12 @@ def _migrate_legacy_data(conn):
         ('urgent', 'ham_urgent', 'sender, groupname, message, timestamp')
     ]
     
-    for old_table, new_table, cols in migrations:
-        try:
+    try:
+        # Start transaction
+        cursor.execute("BEGIN")
+        
+        migrated_any = False
+        for old_table, new_table, cols in migrations:
             # Check if old table exists
             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'")
             if cursor.fetchone():
@@ -88,8 +107,18 @@ def _migrate_legacy_data(conn):
                 # Rename old table to prevent repeated migrations
                 cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
                 logger.info(f"Successfully migrated {old_table}.")
-        except sqlite3.Error:
-            logger.exception(f"Failed to migrate legacy table {old_table}")
+                migrated_any = True
+        
+        if migrated_any:
+            conn.commit()
+            logger.info("Database migration completed successfully.")
+        else:
+            conn.rollback() # Nothing to do
+            
+    except sqlite3.Error:
+        conn.rollback()
+        logger.exception("Database migration failed. Rolled back changes.")
+        raise
 
 def initialize_database():
     conn = get_db_connection()
@@ -146,7 +175,7 @@ def initialize_database():
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )''')
     
-    # Run migrations before committing
+    # Migrations are self-committing or rolling back
     _migrate_legacy_data(conn)
     
     conn.commit()

@@ -230,7 +230,7 @@ def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
             bulletin_id = int(message)
             content_data = get_bulletin_content(bulletin_id)
             if content_data:
-                sender_short_name, date, subject, content, unique_id = content_data
+                sender_short_name, date, subject, content, _unique_id = content_data
                 send_message(f"From: {sender_short_name}\nDate: {date}\nSubject: {subject}\n- - - - - - -\n{content}", sender_id, driver)
             else:
                 send_message("Bulletin not found.", sender_id, driver)
@@ -257,7 +257,7 @@ def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
                 update_user_state(sender_id, None)
                 return
             sender_short_name = node_info['user'].get('shortName', f"Node {sender_id}")
-            unique_id = add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver)
+            _unique_id = add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver)
             send_message(f"Your bulletin '{subject}' has been posted to {board}.\n(╯°□°)╯📄📌[{board}]", sender_id, driver)
             handle_bb_steps(sender_id, 'e', 1, state, driver, bbs_nodes)
         else:
@@ -296,7 +296,7 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             sender_node_id = get_node_id_from_num(sender_id, driver)
             mail_data = get_mail_content(mail_id, sender_node_id)
             if mail_data:
-                sender, date, subject, content, unique_id = mail_data
+                sender, date, subject, content, _unique_id = mail_data
                 send_message(f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n{content}", sender_id, driver)
                 send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
                 update_user_state(sender_id, {'command': 'MAIL', 'step': 4, 'mail_id': mail_id, 'unique_id': unique_id, 'sender': sender, 'subject': subject, 'content': content})
@@ -327,9 +327,9 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
 
     elif step == 4:
         if message.lower() == "d":
-            unique_id = state['unique_id']
+            _unique_id = state['unique_id']
             sender_node_id = get_node_id_from_num(sender_id, driver)
-            delete_mail(unique_id, sender_node_id, bbs_nodes, driver)
+            delete_mail(state['unique_id'], sender_node_id, bbs_nodes, driver)
             send_message("The message has been deleted 🗑️", sender_id, driver)
             update_user_state(sender_id, None)
         elif message.lower() == "r":
@@ -371,14 +371,13 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             recipient_name = get_node_name(recipient_id, driver)
 
             sender_short_name = get_node_short_name(get_node_id_from_num(sender_id, driver), driver)
-            unique_id = add_mail(get_node_id_from_num(sender_id, driver), sender_short_name, recipient_id, subject, content, bbs_nodes, driver)
+            _unique_id = add_mail(get_node_id_from_num(sender_id, driver), sender_short_name, recipient_id, subject, content, bbs_nodes, driver)
             send_message(f"Mail has been posted to the mailbox of {recipient_name}.\n(╯°□°)╯📨📬", sender_id, driver)
 
             notification_message = f"You have a new mail message from {sender_short_name}. Check your mailbox by responding to this message with CM."
             send_message(notification_message, recipient_id, driver)
 
             update_user_state(sender_id, None)
-            update_user_state(sender_id, {'command': 'MAIL', 'step': 8})
         else:
             state['content'] += message + "\n"
             update_user_state(sender_id, state)
@@ -483,7 +482,7 @@ def handle_send_mail_command(sender_id, message, driver, bbs_nodes):
         recipient_name = get_node_name(recipient_id, driver)
         sender_short_name = get_node_short_name(get_node_id_from_num(sender_id, driver), driver)
 
-        unique_id = add_mail(get_node_id_from_num(sender_id, driver), sender_short_name, recipient_id, subject,
+        _unique_id = add_mail(get_node_id_from_num(sender_id, driver), sender_short_name, recipient_id, subject,
                              content, bbs_nodes, driver)
         send_message(f"Mail has been sent to {recipient_name}.", sender_id, driver)
 
@@ -527,11 +526,13 @@ def handle_read_mail_command(sender_id, message, state, driver):
 
         mail_id = mail[message_number][0]
         sender_node_id = get_node_id_from_num(sender_id, driver)
-        sender, date, subject, content, unique_id = get_mail_content(mail_id, sender_node_id)
-        response = f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n\n{content}"
-        send_message(response, sender_id, driver)
-        send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
-        update_user_state(sender_id, {'command': 'CHECK_MAIL', 'step': 2, 'mail_id': mail_id, 'unique_id': unique_id, 'sender': sender, 'subject': subject, 'content': content})
+        mail_data = get_mail_content(mail_id, sender_node_id)
+        if mail_data:
+            sender, date, subject, content, _unique_id = mail_data
+            response = f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n\n{content}"
+            send_message(response, sender_id, driver)
+            send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
+            update_user_state(sender_id, {'command': 'CHECK_MAIL', 'step': 2, 'mail_id': mail_id, 'unique_id': _unique_id, 'sender': sender, 'subject': subject, 'content': content})
 
     except ValueError:
         send_message("Invalid input. Please enter a valid message number.", sender_id, driver)
@@ -547,9 +548,9 @@ def handle_delete_mail_confirmation(sender_id, message, state, driver, bbs_nodes
             choice = choice[0]
 
         if choice == 'd':
-            unique_id = state['unique_id']
+            _unique_id = state['unique_id']
             sender_node_id = get_node_id_from_num(sender_id, driver)
-            delete_mail(unique_id, sender_node_id, bbs_nodes, driver)
+            delete_mail(_unique_id, sender_node_id, bbs_nodes, driver)
             send_message("The message has been deleted 🗑️", sender_id, driver)
             update_user_state(sender_id, None)
         elif choice == 'r':
@@ -576,7 +577,7 @@ def handle_post_bulletin_command(sender_id, message, driver, bbs_nodes):
         _, board_name, subject, content = parts
         sender_short_name = get_node_short_name(get_node_id_from_num(sender_id, driver), driver)
 
-        unique_id = add_bulletin(board_name, sender_short_name, subject, content, bbs_nodes, driver)
+        _unique_id = add_bulletin(board_name, sender_short_name, subject, content, bbs_nodes, driver)
         send_message(f"Your bulletin '{subject}' has been posted to {board_name}.", sender_id, driver)
 
 
@@ -635,7 +636,7 @@ def handle_read_bulletin_command(sender_id, message, state, driver):
             return
 
         bulletin_id = bulletins[message_number][0]
-        sender, date, subject, content, unique_id = get_bulletin_content(bulletin_id)
+        sender, date, subject, content, _unique_id = get_bulletin_content(bulletin_id)
         response = f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n\n{content}"
         send_message(response, sender_id, driver)
 
