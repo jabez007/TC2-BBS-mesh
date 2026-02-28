@@ -156,7 +156,8 @@ def handle_stats_steps(sender_id, message, step, driver):
         elif choice == 'h':
             hw_models = {}
             for node in driver.get_nodes().values():
-                hw_model = node['user'].get('hwModel', 'Unknown')
+                user = node.get('user', {})
+                hw_model = user.get('hwModel', 'Unknown')
                 hw_models[hw_model] = hw_models.get(hw_model, 0) + 1
             response = "Hardware Models:\n" + "\n".join([f"{model}: {count}" for model, count in hw_models.items()])
             send_message(response, sender_id, driver)
@@ -164,7 +165,8 @@ def handle_stats_steps(sender_id, message, step, driver):
         elif choice == 'r':
             roles = {}
             for node in driver.get_nodes().values():
-                role = node['user'].get('role', 'Unknown')
+                user = node.get('user', {})
+                role = user.get('role', 'Unknown')
                 roles[role] = roles.get(role, 0) + 1
             response = "Roles:\n" + "\n".join([f"{role}: {count}" for role, count in roles.items()])
             send_message(response, sender_id, driver)
@@ -257,7 +259,8 @@ def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
                 send_message("Error: Unable to retrieve your node information.", sender_id, driver)
                 update_user_state(sender_id, None)
                 return
-            sender_short_name = node_info['user'].get('shortName', f"Node {sender_id}")
+            user = node_info.get('user', {})
+            sender_short_name = user.get('shortName', f"Node {sender_id}")
             _unique_id = add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver)
             send_message(f"Your bulletin '{subject}' has been posted to {board}.\n(╯°□°)╯📄📌[{board}]", sender_id, driver)
             handle_bb_steps(sender_id, 'e', 1, state, driver, bbs_nodes)
@@ -377,8 +380,9 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             content = state['content']
             recipient_name = get_node_name(recipient_id, driver)
 
-            sender_short_name = get_node_short_name(get_node_id_from_num(sender_id, driver), driver)
-            _unique_id = add_mail(get_node_id_from_num(sender_id, driver), sender_short_name, recipient_id, subject, content, bbs_nodes, driver)
+            sender_node_id = get_node_id_from_num(sender_id, driver)
+            sender_short_name = get_node_short_name(sender_node_id, driver)
+            _unique_id = add_mail(sender_node_id, sender_short_name, recipient_id, subject, content, bbs_nodes, driver)
             send_message(f"Mail has been posted to the mailbox of {recipient_name}.\n(╯°□°)╯📨📬", sender_id, driver)
 
             notification_message = f"You have a new mail message from {sender_short_name}. Check your mailbox by responding to this message with CM."
@@ -403,7 +407,8 @@ def handle_wall_of_shame_command(sender_id, driver):
         metrics = node.get('deviceMetrics', {})
         battery_level = metrics.get('batteryLevel', 101)
         if battery_level < 20:
-            long_name = node['user']['longName']
+            user = node.get('user', {})
+            long_name = user.get('longName', "Unknown Device")
             response += f"{long_name} - Battery {battery_level}%\n"
     if response == "Devices with battery levels below 20%:\n":
         response = "No devices with battery levels below 20% found."
