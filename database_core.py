@@ -3,6 +3,7 @@ import threading
 import logging
 import os
 import configparser
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 thread_local = threading.local()
@@ -35,18 +36,27 @@ def get_db_path():
         return _custom_db_path
         
     # Resolve relative to this module's directory
-    config_file = os.path.join(os.path.dirname(__file__), 'config.ini')
+    module_dir = Path(__file__).parent.resolve()
+    config_file = module_dir / 'config.ini'
     config = configparser.ConfigParser()
     db_path = os.environ.get('BBS_DB_PATH')
     
-    if not db_path and os.path.exists(config_file):
+    if not db_path and config_file.exists():
         try:
             config.read(config_file)
             db_path = config.get('database', 'db_path', fallback=None)
         except configparser.Error:
             pass
             
-    return db_path or DEFAULT_DB_PATH
+    if not db_path:
+        db_path = DEFAULT_DB_PATH
+        
+    # If the path is relative, resolve it against the module directory
+    path_obj = Path(db_path)
+    if not path_obj.is_absolute():
+        path_obj = (module_dir / path_obj).resolve()
+        
+    return str(path_obj)
 
 def get_db_connection():
     global _db_path_version
@@ -165,6 +175,10 @@ def initialize_database():
                     name TEXT NOT NULL,
                     url TEXT NOT NULL
                 )''')
+    
+    # Create indexes for hot filter columns
+    c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_bulletins_board ON mesh_bulletins(board)')
+    c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_mail_recipient ON mesh_mail(recipient)')
     
     # JS8Call tables (ham_ prefix)
     c.execute('''CREATE TABLE IF NOT EXISTS ham_messages (

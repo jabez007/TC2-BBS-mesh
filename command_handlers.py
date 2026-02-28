@@ -77,8 +77,8 @@ def handle_help_command(sender_id, driver, menu_name=None):
 
 def get_node_name(node_id, driver):
     node_info = driver.get_nodes().get(node_id)
-    if node_info:
-        return node_info['user']['longName']
+    if node_info and node_info.get('user'):
+        return node_info['user'].get('longName', f"Node {node_id}")
     return f"Node {node_id}"
 
 
@@ -217,7 +217,7 @@ def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
         elif message.lower() == 'p':
             if board_name.lower() == 'urgent':
                 node_id = get_node_id_from_num(sender_id, driver)
-                allowed_nodes = driver.allowed_nodes
+                allowed_nodes = getattr(driver, 'allowed_nodes', [])
                 logger.debug(f"Checking permissions for node_id: {node_id} against {len(allowed_nodes) if allowed_nodes else 0} allowed nodes")
                 if allowed_nodes and node_id not in allowed_nodes:
                     send_message("You don't have permission to post to this board.", sender_id, driver)
@@ -367,6 +367,12 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
                 recipient_id = get_sender_id_by_mail_id(state['reply_to_mail_id'])  # Get the sender ID from the mail ID
             else:
                 recipient_id = state.get('recipient_id')
+            
+            if recipient_id is None:
+                send_message("Error: Recipient not found. Message cancelled.", sender_id, driver)
+                update_user_state(sender_id, None)
+                return
+
             subject = state['subject']
             content = state['content']
             recipient_name = get_node_name(recipient_id, driver)
