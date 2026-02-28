@@ -3,7 +3,7 @@ set -e
 
 CONFIG_VOL="/home/mesh/bbs/config"
 APP_DIR="/home/mesh/bbs"
-DB_NAME="bulletins.db"
+DB_NAME="bbs.db"
 
 # 1. Compatibility check: If user mounted to /config (legacy), use that instead.
 if [ -f "/config/config.ini" ] && [ ! -f "$CONFIG_VOL/config.ini" ]; then
