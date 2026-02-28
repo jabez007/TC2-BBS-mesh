@@ -76,7 +76,7 @@ def handle_help_command(sender_id, driver, menu_name=None):
     send_message(response, sender_id, driver)
 
 def get_node_name(node_id, driver):
-    node_info = driver.nodes.get(node_id)
+    node_info = driver.get_nodes().get(node_id)
     if node_info:
         return node_info['user']['longName']
     return f"Node {node_id}"
@@ -90,7 +90,7 @@ def handle_mail_command(sender_id, driver):
 
 
 def handle_bulletin_command(sender_id, driver):
-    response = f"📰Bulletin Menu📰\nWhich board would you like to enter?\n[G]eneral  [I]nfo  [N]ews  [U]rgent"
+    response = "📰Bulletin Menu📰\nWhich board would you like to enter?\n[G]eneral  [I]nfo  [N]ews  [U]rgent"
     send_message(response, sender_id, driver)
     update_user_state(sender_id, {'command': 'BULLETIN_MENU', 'step': 1})
 
@@ -140,13 +140,14 @@ def handle_stats_steps(sender_id, message, step, driver):
                 "Last hour": 3600
             }
             total_nodes_summary = []
+            nodes = driver.get_nodes()
 
             for period, seconds in timeframes.items():
                 if seconds is None:
-                    total_nodes = len(driver.nodes)
+                    total_nodes = len(nodes)
                 else:
                     time_limit = current_time - seconds
-                    total_nodes = sum(1 for node in driver.nodes.values() if node.get('lastHeard') is not None and node['lastHeard'] >= time_limit)
+                    total_nodes = sum(1 for node in nodes.values() if node.get('lastHeard') is not None and node['lastHeard'] >= time_limit)
                 total_nodes_summary.append(f"- {period}: {total_nodes}")
 
             response = "Total nodes seen:\n" + "\n".join(total_nodes_summary)
@@ -154,7 +155,7 @@ def handle_stats_steps(sender_id, message, step, driver):
             handle_stats_command(sender_id, driver)
         elif choice == 'h':
             hw_models = {}
-            for node in driver.nodes.values():
+            for node in driver.get_nodes().values():
                 hw_model = node['user'].get('hwModel', 'Unknown')
                 hw_models[hw_model] = hw_models.get(hw_model, 0) + 1
             response = "Hardware Models:\n" + "\n".join([f"{model}: {count}" for model, count in hw_models.items()])
@@ -162,7 +163,7 @@ def handle_stats_steps(sender_id, message, step, driver):
             handle_stats_command(sender_id, driver)
         elif choice == 'r':
             roles = {}
-            for node in driver.nodes.values():
+            for node in driver.get_nodes().values():
                 role = node['user'].get('role', 'Unknown')
                 roles[role] = roles.get(role, 0) + 1
             response = "Roles:\n" + "\n".join([f"{role}: {count}" for role, count in roles.items()])
@@ -251,7 +252,7 @@ def handle_bb_steps(sender_id, message, step, state, driver, bbs_nodes):
             subject = state['subject']
             content = state['content']
             node_id = get_node_id_from_num(sender_id, driver)
-            node_info = driver.nodes.get(node_id)
+            node_info = driver.get_nodes().get(node_id)
             if node_info is None:
                 send_message("Error: Unable to retrieve your node information.", sender_id, driver)
                 update_user_state(sender_id, None)
@@ -296,7 +297,7 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             sender_node_id = get_node_id_from_num(sender_id, driver)
             mail_data = get_mail_content(mail_id, sender_node_id)
             if mail_data:
-                sender, date, subject, content, _unique_id = mail_data
+                sender, date, subject, content, unique_id = mail_data
                 send_message(f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n{content}", sender_id, driver)
                 send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
                 update_user_state(sender_id, {'command': 'MAIL', 'step': 4, 'mail_id': mail_id, 'unique_id': unique_id, 'sender': sender, 'subject': subject, 'content': content})
@@ -392,7 +393,7 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
 
 def handle_wall_of_shame_command(sender_id, driver):
     response = "Devices with battery levels below 20%:\n"
-    for node_id, node in driver.nodes.items():
+    for node_id, node in driver.get_nodes().items():
         metrics = node.get('deviceMetrics', {})
         battery_level = metrics.get('batteryLevel', 101)
         if battery_level < 20:

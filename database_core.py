@@ -8,12 +8,13 @@ logger = logging.getLogger(__name__)
 thread_local = threading.local()
 _connections = {}
 _connections_lock = threading.Lock()
+_db_path_version = 0
 
 DEFAULT_DB_PATH = 'bbs.db'
 _custom_db_path = None
 
 def set_db_path(path):
-    global _custom_db_path
+    global _custom_db_path, _db_path_version
     _custom_db_path = path
     # Close and clear all tracked connections
     with _connections_lock:
@@ -23,6 +24,7 @@ def set_db_path(path):
             except Exception:
                 logger.exception(f"Error closing tracked connection for thread {tid}")
         _connections.clear()
+        _db_path_version += 1
     
     # Also clear for current thread if it exists
     if hasattr(thread_local, 'connection'):
@@ -47,7 +49,18 @@ def get_db_path():
     return db_path or DEFAULT_DB_PATH
 
 def get_db_connection():
+    global _db_path_version
     db_path = get_db_path()
+    
+    # Check if we need to discard current connection due to path change
+    if hasattr(thread_local, 'connection') and thread_local.connection is not None:
+        if getattr(thread_local, 'conn_version', -1) != _db_path_version:
+            try:
+                thread_local.connection.close()
+            except:
+                pass
+            thread_local.connection = None
+
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
         try:
             conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
@@ -56,6 +69,7 @@ def get_db_connection():
             conn.execute("PRAGMA synchronous=NORMAL")
             
             thread_local.connection = conn
+            thread_local.conn_version = _db_path_version
             with _connections_lock:
                 _connections[threading.get_ident()] = conn
         except sqlite3.Error:
