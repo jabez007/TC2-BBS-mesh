@@ -43,6 +43,11 @@ class BaseRadioDriver(abc.ABC):
         """Closes the radio interface"""
         raise NotImplementedError
 
+    @abc.abstractmethod
+    def getNode(self, node_id):
+        """Returns node info for keepalive"""
+        raise NotImplementedError
+
 
 class MeshtasticDriver(BaseRadioDriver):
     """
@@ -132,3 +137,6 @@ class MeshCoreStubDriver(BaseRadioDriver):
 
     def close(self):
         pass
+
+    def getNode(self, node_id):
+        return None
