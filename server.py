@@ -41,6 +41,7 @@ logging.basicConfig(
 # JS8Call logging
 js8call_logger = logging.getLogger('js8call')
 js8call_logger.setLevel(logging.DEBUG)
+js8call_logger.propagate = False # Prevent duplicate logs by stopping propagation to root logger
 js8call_handler = logging.StreamHandler()
 js8call_handler.setLevel(logging.DEBUG)
 js8call_formatter = logging.Formatter('%(asctime)s - JS8Call - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S')
@@ -49,6 +50,8 @@ js8call_logger.addHandler(js8call_handler)
 
 js8_thread_lock = threading.Lock()
 last_rx_lock = threading.Lock()
+
+logger = logging.getLogger(__name__)
 
 def write_atomic_heartbeat(path, content):
     """Atomically writes content to path using a temporary file."""
@@ -62,7 +65,7 @@ def write_atomic_heartbeat(path, content):
         # Atomically rename the temp file to the target path
         os.replace(temp_path, path)
     except OSError as e:
-        logging.debug(f"Atomic heartbeat write failed: {e}")
+        logger.debug(f"Atomic heartbeat write failed: {e}")
         # Cleanup temp file if it exists and wasn't renamed
         if 'temp_path' in locals() and os.path.exists(temp_path):
             try:
@@ -92,7 +95,7 @@ def main():
 
     merge_config(system_config, args)
 
-    logging.info(f"TC²-BBS is starting on {system_config['interface_type']} interface...")
+    logger.info(f"TC²-BBS is starting on {system_config['interface_type']} interface...")
 
     initialize_database()
 
@@ -110,13 +113,13 @@ def main():
         runtime_dir = tempfile.gettempdir()
         
     heartbeat_path = os.environ.get('BBS_HEARTBEAT_PATH', os.path.join(runtime_dir, 'bbs_heartbeat'))
-    logging.info(f"Using heartbeat path: {heartbeat_path}")
+    logger.info(f"Using heartbeat path: {heartbeat_path}")
 
     # Watchdog and Keepalive configuration
     try:
         WATCHDOG_TIMEOUT = int(os.environ.get('BBS_WATCHDOG_TIMEOUT', 300))
         if WATCHDOG_TIMEOUT <= 0:
-            logging.warning("BBS_WATCHDOG_TIMEOUT must be positive. Falling back to default (300).")
+            logger.warning("BBS_WATCHDOG_TIMEOUT must be positive. Falling back to default (300).")
             WATCHDOG_TIMEOUT = 300
     except (ValueError, TypeError):
         WATCHDOG_TIMEOUT = 300
@@ -124,12 +127,12 @@ def main():
     try:
         KEEPALIVE_INTERVAL = int(os.environ.get('BBS_KEEPALIVE_INTERVAL', 120))
         if KEEPALIVE_INTERVAL <= 0:
-            logging.warning("BBS_KEEPALIVE_INTERVAL must be positive. Falling back to default (120).")
+            logger.warning("BBS_KEEPALIVE_INTERVAL must be positive. Falling back to default (120).")
             KEEPALIVE_INTERVAL = 120
     except (ValueError, TypeError):
         KEEPALIVE_INTERVAL = 120
     
-    logging.info(f"Watchdog timeout: {WATCHDOG_TIMEOUT}s, Keepalive interval: {KEEPALIVE_INTERVAL}s")
+    logger.info(f"Watchdog timeout: {WATCHDOG_TIMEOUT}s, Keepalive interval: {KEEPALIVE_INTERVAL}s")
 
     # Track last received packet for a deep health check (protected by last_rx_lock)
     last_rx_time = time.time()
@@ -165,11 +168,11 @@ def main():
                 with js8_thread_lock:
                     if js8call_client.db_conn and not js8call_client.connected:
                         if js8_thread is None or not js8_thread.is_alive():
-                            logging.info("Starting JS8Call connection thread...")
+                            logger.info("Starting JS8Call connection thread...")
                             js8_thread = threading.Thread(target=js8call_client.connect, args=(js8_thread_lock,), daemon=True)
                             js8_thread.start()
 
-                logging.info("Connected to Meshtastic interface.")
+                logger.info("Connected to Meshtastic interface.")
                 
                 # Reset RX time on successful connection to avoid immediate watchdog trigger
                 with last_rx_lock:
@@ -188,7 +191,7 @@ def main():
                             # getpeername() raises OSError if the socket is no longer connected
                             interface.socket.getpeername()
                         except OSError:
-                            logging.warning("Detected disconnected socket in underlying TCP watchdog.")
+                            logger.warning("Detected disconnected socket in underlying TCP watchdog.")
                             should_sleep = True
                             break
 
@@ -207,7 +210,7 @@ def main():
                     reader_alive = is_conn
 
                     if not is_conn:
-                        logging.error("Meshtastic interface reports disconnected.")
+                        logger.error("Meshtastic interface reports disconnected.")
                         should_sleep = True
                         break
 
@@ -218,14 +221,14 @@ def main():
                     rx_delta = now - current_last_rx
                     
                     if rx_delta > WATCHDOG_TIMEOUT:
-                        logging.warning(f"No packets received for {int(rx_delta)}s. Forcing reconnect.")
+                        logger.warning(f"No packets received for {int(rx_delta)}s. Forcing reconnect.")
                         should_sleep = True
                         break
                     elif rx_delta > KEEPALIVE_INTERVAL and (now - last_keepalive_sent) > KEEPALIVE_INTERVAL:
                         # Generate keepalive traffic to maintain connection on quiet meshes
                         # Querying a remote node ID if available to trigger network I/O
                         try:
-                            logging.debug("Mesh quiet, generating keepalive traffic...")
+                            logger.debug("Mesh quiet, generating keepalive traffic...")
                             target_node = interface.myInfo.my_node_id
                             if interface.bbs_nodes:
                                 # Use a known remote BBS node
@@ -240,7 +243,7 @@ def main():
                             interface.getNode(target_node)
                             last_keepalive_sent = now
                         except Exception as e:
-                            logging.debug(f"Keepalive traffic failed: {e}")
+                            logger.debug(f"Keepalive traffic failed: {e}")
 
                     # 4. Heartbeat update
                     # Format: TIMESTAMP|STATUS|READER_ALIVE|LAST_RX_TIME
@@ -249,28 +252,28 @@ def main():
                     time.sleep(5)
 
             except Exception:
-                logging.exception("Error in main loop. Cleanup then retrying...")
+                logger.exception("Error in main loop. Cleanup then retrying...")
                 should_sleep = True
             finally:
                 # 1. Unsubscribe first so no more packets reach on_receive
                 try:
                     pub.unsubAll(system_config['mqtt_topic'])
                 except TopicNameError as e:
-                    logging.debug(f"pub.unsubAll TopicNameError: {e}")
+                    logger.debug(f"pub.unsubAll TopicNameError: {e}")
                 except Exception:
-                    logging.debug("pub.unsubAll cleanup", exc_info=True)
+                    logger.debug("pub.unsubAll cleanup", exc_info=True)
 
                 # 2. Before closing the interface, stop the message processing executor
                 # so no background tasks try to use the closed interface.
-                # wait=True ensures in-flight tasks finish before we close interface.
-                shutdown_executor(wait=True, cancel_futures=True)
+                # we use wait=False here to avoid deadlocking if a background task is stuck on a broken interface
+                shutdown_executor(wait=False, cancel_futures=True)
 
                 # 3. Finally close the hardware interface
                 if interface:
                     try:
                         interface.close()
                     except Exception:
-                        logging.exception("Error closing interface in main loop finally")
+                        logger.exception("Error closing interface in main loop finally")
                     interface = None # Ensure reference is cleared for next iteration or shutdown
                 
                 # Update heartbeat to reflect state during back-off/reconnection
@@ -279,23 +282,23 @@ def main():
                 write_atomic_heartbeat(heartbeat_path, f"{time.time()}|DISCONNECTED|False|{reported_last_rx}")
 
                 if should_sleep:
-                    logging.info("Waiting 10 seconds before reconnection attempt...")
+                    logger.info("Waiting 10 seconds before reconnection attempt...")
                     time.sleep(10)
 
     except KeyboardInterrupt:
-        logging.info("Shutting down the server...")
+        logger.info("Shutting down the server...")
     finally:
         # Final shutdown cleanup - shutdown executor FIRST to stop in-flight tasks
         shutdown_executor(wait=True)
         
         if js8call_client:
             try:
-                logging.info("Signaling JS8Call client to close...")
+                logger.info("Signaling JS8Call client to close...")
                 with js8_thread_lock:
                     # We hold the lock here, so we pass lock=None to close() to avoid deadlock
                     js8call_client.close(lock=None)
             except Exception:
-                logging.exception("Error closing JS8Call client during shutdown")
+                logger.exception("Error closing JS8Call client during shutdown")
         
         # Cleanup heartbeat file
         try:
@@ -303,7 +306,7 @@ def main():
         except FileNotFoundError:
             pass
         except OSError as e:
-            logging.debug(f"Error removing heartbeat file during cleanup: {e}")
+            logger.debug(f"Error removing heartbeat file during cleanup: {e}")
 
 if __name__ == "__main__":
     main()
