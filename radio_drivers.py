@@ -56,9 +56,14 @@ class MeshtasticDriver(BaseRadioDriver):
 
     def __init__(self, interface):
         self.interface = interface
-        # For compatibility with existing code that looks for .bbs_nodes on the interface
-        self.bbs_nodes = getattr(interface, "bbs_nodes", [])
-        self.allowed_nodes = getattr(interface, "allowed_nodes", [])
+
+    @property
+    def bbs_nodes(self):
+        return getattr(self.interface, "bbs_nodes", [])
+
+    @property
+    def allowed_nodes(self):
+        return getattr(self.interface, "allowed_nodes", [])
 
     @property
     def myInfo(self):
@@ -115,6 +120,14 @@ class MeshCoreStubDriver(BaseRadioDriver):
     def __init__(self, config):
         self.config = config
         logger.info("Mesh Core Driver Stub initialized (Hardware not yet connected)")
+
+    @property
+    def bbs_nodes(self):
+        return []
+
+    @property
+    def allowed_nodes(self):
+        return []
 
     def send_text(self, text, destination_id, want_ack=True):
         logger.info(f"MESH CORE STUB: Sending '{text}' to {destination_id}")
