@@ -116,8 +116,9 @@ def handle_fortune_command(sender_id, driver):
         fortune = random.choice(fortunes).strip()
         decorated_fortune = f"🔮 {fortune} 🔮"
         send_message(decorated_fortune, sender_id, driver)
-    except Exception as e:
-        send_message(f"Error generating fortune: {e}", sender_id, driver)
+    except Exception:
+        logger.exception("Error generating fortune")
+        send_message("An error occurred while generating your fortune. Please try again later.", sender_id, driver)
 
 
 def handle_stats_steps(sender_id, message, step, driver):
@@ -345,12 +346,19 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
         update_user_state(sender_id, {'command': 'MAIL', 'step': 7, 'recipient_id': state['recipient_id'], 'subject': subject, 'content': ''})
 
     elif step == 6:
-        selected_node_index = int(message)
-        selected_node = state['nodes'][selected_node_index]
-        recipient_id = selected_node['num']
-        recipient_name = get_node_name(recipient_id, driver)
-        send_message(f"What is the subject of your message to {recipient_name}?\nKeep it short.", sender_id, driver)
-        update_user_state(sender_id, {'command': 'MAIL', 'step': 5, 'recipient_id': recipient_id})
+        try:
+            selected_node_index = int(message)
+            nodes = state.get('nodes', [])
+            if 0 <= selected_node_index < len(nodes):
+                selected_node = nodes[selected_node_index]
+                recipient_id = selected_node['num']
+                recipient_name = get_node_name(recipient_id, driver)
+                send_message(f"What is the subject of your message to {recipient_name}?\nKeep it short.", sender_id, driver)
+                update_user_state(sender_id, {'command': 'MAIL', 'step': 5, 'recipient_id': recipient_id})
+            else:
+                send_message("Invalid selection. Please choose a node from the list.", sender_id, driver)
+        except ValueError:
+            send_message("Invalid input. Please enter a number.", sender_id, driver)
 
     elif step == 7:
         if message.lower() == "end":

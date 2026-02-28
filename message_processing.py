@@ -145,16 +145,17 @@ def process_message(sender_id, message, driver, is_sync_message=False):
     if is_sync_message:
         try:
             if message.startswith("BULLETIN|"):
-                parts = message.split("|")
-                if len(parts) < 6:
+                # Robust split: extract unique_id from end, then split prefix
+                if message.count("|") < 5:
                     logger.warning(f"Malformed BULLETIN sync message: {message}")
                     return
-                board, sender_short_name, subject, content, unique_id = (
+                remainder, unique_id = message.rsplit("|", 1)
+                parts = remainder.split("|", 4)
+                board, sender_short_name, subject, content = (
                     parts[1],
                     parts[2],
                     parts[3],
                     parts[4],
-                    parts[5],
                 )
                 add_bulletin(
                     board,
@@ -165,22 +166,18 @@ def process_message(sender_id, message, driver, is_sync_message=False):
                     driver,
                     unique_id=unique_id,
                 )
-
-                if board.lower() == "urgent":
-                    notification_message = f"💥NEW URGENT BULLETIN💥\nFrom: {sender_short_name}\nTitle: {subject}\nDM 'CB,,Urgent' to view"
-                    send_message(notification_message, BROADCAST_NUM, driver)
             elif message.startswith("MAIL|"):
-                parts = message.split("|")
-                if len(parts) < 7:
+                if message.count("|") < 6:
                     logger.warning(f"Malformed MAIL sync message: {message}")
                     return
-                sender_id, sender_short_name, recipient_id, subject, content, unique_id = (
+                remainder, unique_id = message.rsplit("|", 1)
+                parts = remainder.split("|", 5)
+                sender_id, sender_short_name, recipient_id, subject, content = (
                     parts[1],
                     parts[2],
                     parts[3],
                     parts[4],
                     parts[5],
-                    parts[6],
                 )
                 add_mail(
                     sender_id,

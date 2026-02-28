@@ -61,6 +61,36 @@ def close_db_connection():
         finally:
             thread_local.connection = None
 
+def _migrate_legacy_data(conn):
+    """
+    Migrates data from legacy table names to the new prefixed tables.
+    """
+    cursor = conn.cursor()
+    
+    # Mapping of (legacy_table, new_table, columns)
+    migrations = [
+        ('bulletins', 'mesh_bulletins', 'board, sender_short_name, date, subject, content, unique_id'),
+        ('mail', 'mesh_mail', 'sender, sender_short_name, recipient, date, subject, content, unique_id'),
+        ('channels', 'mesh_channels', 'name, url'),
+        ('messages', 'ham_messages', 'sender, receiver, message, timestamp'),
+        ('groups', 'ham_groups', 'sender, groupname, message, timestamp'),
+        ('urgent', 'ham_urgent', 'sender, groupname, message, timestamp')
+    ]
+    
+    for old_table, new_table, cols in migrations:
+        try:
+            # Check if old table exists
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'")
+            if cursor.fetchone():
+                logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
+                # INSERT OR IGNORE handles deduplication via the UNIQUE(unique_id) constraint
+                cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
+                # Rename old table to prevent repeated migrations
+                cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
+                logger.info(f"Successfully migrated {old_table}.")
+        except sqlite3.Error:
+            logger.exception(f"Failed to migrate legacy table {old_table}")
+
 def initialize_database():
     conn = get_db_connection()
     if conn is None:
@@ -115,5 +145,9 @@ def initialize_database():
                     message TEXT,
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )''')
+    
+    # Run migrations before committing
+    _migrate_legacy_data(conn)
+    
     conn.commit()
     logger.info("Database schema initialized with mesh_ and ham_ prefixes.")

@@ -5,6 +5,9 @@ from database_core import get_db_connection, initialize_database
 
 def list_mesh_bulletins():
     conn = get_db_connection()
+    if not conn:
+        print_bold("Database connection unavailable.")
+        return []
     c = conn.cursor()
     c.execute(
         "SELECT id, board, sender_short_name, date, subject, unique_id FROM mesh_bulletins"
@@ -24,6 +27,9 @@ def list_mesh_bulletins():
 
 def list_mesh_mail():
     conn = get_db_connection()
+    if not conn:
+        print_bold("Database connection unavailable.")
+        return []
     c = conn.cursor()
     c.execute(
         "SELECT id, sender, sender_short_name, recipient, date, subject, unique_id FROM mesh_mail"
@@ -43,6 +49,9 @@ def list_mesh_mail():
 
 def list_mesh_channels():
     conn = get_db_connection()
+    if not conn:
+        print_bold("Database connection unavailable.")
+        return []
     c = conn.cursor()
     c.execute("SELECT id, name, url FROM mesh_channels")
     channels = c.fetchall()
@@ -58,6 +67,9 @@ def list_mesh_channels():
 
 def list_ham_messages():
     conn = get_db_connection()
+    if not conn:
+        print_bold("Database connection unavailable.")
+        return []
     c = conn.cursor()
     c.execute("SELECT id, sender, receiver, message, timestamp FROM ham_messages")
     messages = c.fetchall()
@@ -71,7 +83,14 @@ def list_ham_messages():
     return messages
 
 
+ALLOWED_TABLES = ("mesh_bulletins", "mesh_mail", "mesh_channels", "ham_messages")
+
+
 def _delete_records(table_name, record_type, id_list_str):
+    if table_name not in ALLOWED_TABLES:
+        print_bold("Error: Unauthorized operation.")
+        return
+
     if "X" in [id.strip().upper() for id in id_list_str.split(",")]:
         print_bold("Deletion cancelled.")
         print_separator()
@@ -96,6 +115,9 @@ def _delete_records(table_name, record_type, id_list_str):
         return
 
     conn = get_db_connection()
+    if not conn:
+        print_bold("Database connection unavailable.")
+        return
     c = conn.cursor()
     deleted_count = 0
     for record_id in valid_ids:
