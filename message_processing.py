@@ -4,27 +4,29 @@ from contextlib import closing
 
 from meshtastic import BROADCAST_NUM
 
+logger = logging.getLogger(__name__)
+
 # Use a thread pool to process messages without blocking the Meshtastic interface thread
 executor = None
 
 def init_executor():
     global executor
     if executor is None:
-        logging.info("Initializing message processing executor...")
+        logger.info("Initializing message processing executor...")
         executor = ThreadPoolExecutor(max_workers=5)
     return executor
 
 def shutdown_executor(wait=True, cancel_futures=False):
     global executor
     if executor:
-        logging.info(f"Shutting down message processing executor (wait={wait}, cancel_futures={cancel_futures})...")
+        logger.info(f"Shutting down message processing executor (wait={wait}, cancel_futures={cancel_futures})...")
         try:
             # cancel_futures added in Python 3.9
             executor.shutdown(wait=wait, cancel_futures=cancel_futures)
         except TypeError:
             executor.shutdown(wait=wait)
         executor = None
-        logging.info("Executor shut down.")
+        logger.info("Executor shut down.")
 
 # Initialize at module load
 init_executor()
@@ -109,7 +111,7 @@ def process_message(sender_id, message, interface, is_sync_message=False):
             delete_bulletin(unique_id, [], interface)
         elif message.startswith("DELETE_MAIL|"):
             unique_id = message.split("|")[1]
-            logging.info(f"Processing delete mail with unique_id: {unique_id}")
+            logger.info(f"Processing delete mail with unique_id: {unique_id}")
             recipient_id = get_recipient_id_by_mail(unique_id)
             delete_mail(unique_id, recipient_id, [], interface)
         elif message.startswith("CHANNEL|"):
@@ -212,23 +214,23 @@ def on_receive(packet, interface):
             future.add_done_callback(_log_future_exception)
         except RuntimeError:
             # Fallback if executor is shutting down
-            logging.warning("Executor shutting down, processing packet synchronously")
+            logger.warning("Executor shutting down, processing packet synchronously")
             _process_received_packet_safe(packet, interface)
     else:
-        logging.warning("Executor unavailable, processing packet synchronously")
+        logger.warning("Executor unavailable, processing packet synchronously")
         _process_received_packet_safe(packet, interface)
 
 def _process_received_packet_safe(packet, interface):
     try:
         _process_received_packet(packet, interface)
     except Exception:
-        logging.exception("Synchronous packet processing failed")
+        logger.exception("Synchronous packet processing failed")
 
 def _log_future_exception(future):
     try:
         future.result()
     except Exception:
-        logging.exception("Background task failed with exception")
+        logger.exception("Background task failed with exception")
 
 def _process_received_packet(packet, interface):
     try:
@@ -242,7 +244,9 @@ def _process_received_packet(packet, interface):
             sender_short_name = get_node_short_name(sender_node_id, interface)
             receiver_short_name = get_node_short_name(get_node_id_from_num(to_id, interface),
                                                       interface) if to_id else "Group Chat"
-            logging.info(f"Received message from user '{sender_short_name}' ({sender_node_id}) to {receiver_short_name}: {message_string}")
+            
+            logger.info(f"Received message from user '{sender_short_name}' ({sender_node_id}) to {receiver_short_name}")
+            logger.debug(f"Message content: {message_string[:50]}{'...' if len(message_string) > 50 else ''}") # Truncated content for debug only
 
             bbs_nodes = interface.bbs_nodes
             is_sync_message = any(message_string.startswith(prefix) for prefix in
@@ -252,13 +256,13 @@ def _process_received_packet(packet, interface):
                 if is_sync_message:
                     process_message(sender_id, message_string, interface, is_sync_message=True)
                 else:
-                    logging.info("Ignoring non-sync message from known BBS node")
+                    logger.info("Ignoring non-sync message from known BBS node")
             elif to_id is not None and to_id != 0 and to_id != 255 and to_id == interface.myInfo.my_node_num:
                 process_message(sender_id, message_string, interface, is_sync_message=False)
             else:
-                logging.info("Ignoring message sent to group chat or from unknown node")
+                logger.info("Ignoring message sent to group chat or from unknown node")
     except Exception:
-        logging.exception("Error processing packet")
+        logger.exception("Error processing packet")
 
 def get_recipient_id_by_mail(unique_id):
     # Fix for Mail Delete sync issue with proper resource management
@@ -277,5 +281,5 @@ def get_recipient_id_by_mail(unique_id):
             finally:
                 c.close()
     except Exception:
-        logging.exception("Error in get_recipient_id_by_mail")
+        logger.exception("Error in get_recipient_id_by_mail")
         return None
