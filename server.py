@@ -211,8 +211,8 @@ Multi-Mode BBS Engine
         """Cleanup after a single radio session."""
         try:
             pub.unsubAll(self.config["mqtt_topic"])
-        except (TopicNameError, Exception):
-            pass
+        except (TopicNameError, Exception) as e:
+            logger.debug(f"Failed to unsubscribe from {self.config['mqtt_topic']}: {e}", exc_info=True)
 
         shutdown_executor(wait=False, cancel_futures=True)
 
