@@ -18,26 +18,25 @@ def get_user_state(user_id):
         return user_states.get(user_id, None)
 
 
-def send_message(message, destination, interface):
+def send_message(message, destination, driver):
     max_payload_size = 200
     for i in range(0, len(message), max_payload_size):
         chunk = message[i:i + max_payload_size]
         try:
-            d = interface.sendText(
+            d = driver.send_text(
                 text=chunk,
-                destinationId=destination,
-                wantAck=True,
-                wantResponse=False
+                destination_id=destination,
+                want_ack=True
             )
-            destid = get_node_id_from_num(destination, interface)
+            destid = get_node_id_from_num(destination, driver)
             chunk = chunk.replace('\n', '\\n')
-            logger.info(f"Sending message to user '{get_node_short_name(destid, interface)}' ({destid}) with sendID {d.id}: \"{chunk}\"")
+            logger.info(f"Sending message to user '{get_node_short_name(destid, driver)}' ({destid}) with sendID {getattr(d, 'id', 'N/A')}: \"{chunk}\"")
         except OSError:
-            logger.exception("CONNECTION ERROR during send. Closing interface to trigger reconnect.")
+            logger.exception("CONNECTION ERROR during send. Closing driver to trigger reconnect.")
             try:
-                interface.close()
+                driver.close()
             except Exception as close_err:
-                logger.debug(f"Error closing interface: {close_err}")
+                logger.debug(f"Error closing driver: {close_err}")
             return False # Return False to signal connection failure
         except Exception:
             logger.exception("REPLY SEND ERROR")
@@ -47,60 +46,57 @@ def send_message(message, destination, interface):
     return True
 
 
-def get_node_info(interface, short_name):
+def get_node_info(driver, short_name):
     nodes = [{'num': node_id, 'shortName': node['user']['shortName'], 'longName': node['user']['longName']}
-             for node_id, node in interface.nodes.items()
+             for node_id, node in driver.get_nodes().items()
              if node['user']['shortName'].lower() == short_name]
     return nodes
 
 
-def get_node_id_from_num(node_num, interface):
-    for node_id, node in interface.nodes.items():
+def get_node_id_from_num(node_num, driver):
+    for node_id, node in driver.get_nodes().items():
         if node['num'] == node_num:
             return node_id
     return None
 
 
-def get_node_short_name(node_id, interface):
-    node_info = interface.nodes.get(node_id)
-    if node_info:
-        return node_info['user']['shortName']
-    return None
+def get_node_short_name(node_id, driver):
+    return driver.get_short_name(node_id)
 
 
-def send_bulletin_to_bbs_nodes(board, sender_short_name, subject, content, unique_id, bbs_nodes, interface):
+def send_bulletin_to_bbs_nodes(board, sender_short_name, subject, content, unique_id, bbs_nodes, driver):
     message = f"BULLETIN|{board}|{sender_short_name}|{subject}|{content}|{unique_id}"
     for node_id in bbs_nodes:
-        if not send_message(message, node_id, interface):
+        if not send_message(message, node_id, driver):
             break
 
 
 def send_mail_to_bbs_nodes(sender_id, sender_short_name, recipient_id, subject, content, unique_id, bbs_nodes,
-                           interface):
+                           driver):
     message = f"MAIL|{sender_id}|{sender_short_name}|{recipient_id}|{subject}|{content}|{unique_id}"
     logger.info(f"SERVER SYNC: Syncing new mail message {subject} sent from {sender_short_name} to other BBS systems.")
     for node_id in bbs_nodes:
-        if not send_message(message, node_id, interface):
+        if not send_message(message, node_id, driver):
             break
 
 
-def send_delete_bulletin_to_bbs_nodes(bulletin_id, bbs_nodes, interface):
+def send_delete_bulletin_to_bbs_nodes(bulletin_id, bbs_nodes, driver):
     message = f"DELETE_BULLETIN|{bulletin_id}"
     for node_id in bbs_nodes:
-        if not send_message(message, node_id, interface):
+        if not send_message(message, node_id, driver):
             break
 
 
-def send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, interface):
+def send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, driver):
     message = f"DELETE_MAIL|{unique_id}"
     logger.info(f"SERVER SYNC: Sending delete mail sync message with unique_id: {unique_id}")
     for node_id in bbs_nodes:
-        if not send_message(message, node_id, interface):
+        if not send_message(message, node_id, driver):
             break
 
 
-def send_channel_to_bbs_nodes(name, url, bbs_nodes, interface):
+def send_channel_to_bbs_nodes(name, url, bbs_nodes, driver):
     message = f"CHANNEL|{name}|{url}"
     for node_id in bbs_nodes:
-        if not send_message(message, node_id, interface):
+        if not send_message(message, node_id, driver):
             break

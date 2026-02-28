@@ -77,11 +77,11 @@ def check_meshtastic_connection(host="localhost", port=4403):
 
 def check_files(config_path):
     """Verify essential application files exist"""
-    # SQLite uses bulletins.db in current working directory of server.py
-    # Look in CWD and config dir for bulletins.db to match server resolution
+    # SQLite uses bbs.db in current working directory of server.py
+    # Look in CWD and config dir for bbs.db to match server resolution
     db_paths = [
-        "bulletins.db",
-        os.path.join(os.path.dirname(config_path), "bulletins.db")
+        "bbs.db",
+        os.path.join(os.path.dirname(config_path), "bbs.db")
     ]
     
     found_db = False
@@ -91,7 +91,7 @@ def check_files(config_path):
             break
             
     if not found_db:
-        print("Essential file missing or not readable: bulletins.db (looked in CWD and config dir)")
+        print("Essential file missing or not readable: bbs.db (looked in CWD and config dir)")
         return False
         
     return True
