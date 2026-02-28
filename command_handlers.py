@@ -393,7 +393,7 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
 
 def handle_wall_of_shame_command(sender_id, driver):
     response = "Devices with battery levels below 20%:\n"
-    for node_id, node in driver.get_nodes().items():
+    for _node_id, node in driver.get_nodes().items():
         metrics = node.get('deviceMetrics', {})
         battery_level = metrics.get('batteryLevel', 101)
         if battery_level < 20:
@@ -637,9 +637,13 @@ def handle_read_bulletin_command(sender_id, message, state, driver):
             return
 
         bulletin_id = bulletins[message_number][0]
-        sender, date, subject, content, _unique_id = get_bulletin_content(bulletin_id)
-        response = f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n\n{content}"
-        send_message(response, sender_id, driver)
+        content_tuple = get_bulletin_content(bulletin_id)
+        if content_tuple:
+            sender, date, subject, content, _unique_id = content_tuple
+            response = f"Date: {date}\nFrom: {sender}\nSubject: {subject}\n\n{content}"
+            send_message(response, sender_id, driver)
+        else:
+            send_message("Bulletin no longer available.", sender_id, driver)
 
         update_user_state(sender_id, None)
 

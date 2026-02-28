@@ -57,8 +57,8 @@ def get_db_connection():
         if getattr(thread_local, 'conn_version', -1) != _db_path_version:
             try:
                 thread_local.connection.close()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Error closing stale connection: {e}")
             thread_local.connection = None
 
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
@@ -189,8 +189,10 @@ def initialize_database():
                     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                 )''')
     
+    # Commit table creation before starting migration transaction
+    conn.commit()
+    
     # Migrations are self-committing or rolling back
     _migrate_legacy_data(conn)
     
-    conn.commit()
     logger.info("Database schema initialized with mesh_ and ham_ prefixes.")
