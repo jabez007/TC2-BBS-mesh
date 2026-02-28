@@ -32,11 +32,15 @@ def set_db_path(path):
         thread_local.connection = None
 
 def get_db_path():
-    if _custom_db_path:
-        return _custom_db_path
-        
     # Resolve relative to this module's directory
     module_dir = Path(__file__).parent.resolve()
+    
+    if _custom_db_path:
+        path_obj = Path(_custom_db_path)
+        if not path_obj.is_absolute():
+            path_obj = (module_dir / path_obj).resolve()
+        return str(path_obj)
+        
     config_file = module_dir / 'config.ini'
     config = configparser.ConfigParser()
     db_path = os.environ.get('BBS_DB_PATH')
@@ -126,8 +130,17 @@ def _migrate_legacy_data(conn):
             cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'")
             if cursor.fetchone():
                 logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
-                # INSERT OR IGNORE handles deduplication via the UNIQUE(unique_id) constraint
-                cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
+                
+                # Deduplication strategy:
+                # 1. Mesh tables (mesh_bulletins, mesh_mail) have a UNIQUE(unique_id) constraint.
+                # 2. Ham tables (ham_messages, ham_groups, ham_urgent) and channels do not.
+                # We use INSERT OR IGNORE for mesh tables and a SELECT DISTINCT approach for the others.
+                if new_table in ('mesh_bulletins', 'mesh_mail'):
+                    cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
+                else:
+                    # For ham tables and channels, avoid exact duplicate rows during migration
+                    cursor.execute(f"INSERT INTO {new_table} ({cols}) SELECT DISTINCT {cols} FROM {old_table}")
+                
                 # Rename old table to prevent repeated migrations
                 cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
                 logger.info(f"Successfully migrated {old_table}.")
