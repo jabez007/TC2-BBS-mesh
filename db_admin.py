@@ -2,6 +2,7 @@ import os
 import logging
 import sqlite3
 import sys
+import subprocess
 
 from database_core import get_db_connection, initialize_database
 
@@ -198,11 +199,11 @@ def clear_screen():
     # Cross-platform screen clearing with ANSI fallback
     try:
         if os.name == "nt":
-            os.system("cls")
+            subprocess.run(["cls"], check=False, shell=True)
         else:
-            os.system("clear")
+            subprocess.run(["clear"], check=False)
     except Exception:
-        # Fallback to direct ANSI sequence if os.system fails
+        # Fallback to direct ANSI sequence if subprocess fails
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
 
