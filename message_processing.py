@@ -256,16 +256,13 @@ def process_message(sender_id, message, driver, is_sync_message=False):
                 handle_help_command(sender_id, driver)
                 return
 
+            MENU_COMMANDS = ["MAIN_MENU", "BULLETIN_MENU", "BULLETIN_ACTION", "STATS", "JS8CALL_MENU", "MENU", "CHECK_MAIL", "CHECK_BULLETIN", "CHECK_CHANNEL", "LIST_CHANNELS", "CHANNEL_DIRECTORY"]
             if message_lower in handlers:
-                if state and state["command"] in [
-                    "BULLETIN_ACTION",
-                    "BULLETIN_READ",
-                    "BULLETIN_POST",
-                    "BULLETIN_POST_CONTENT",
-                ]:
-                    handlers[message_lower](sender_id, driver, state)
-                else:
-                    handlers[message_lower](sender_id, driver)
+                if state is None or state["command"] in MENU_COMMANDS:
+                    if state and state["command"] == "BULLETIN_ACTION":
+                        handlers[message_lower](sender_id, driver, state)
+                    else:
+                        handlers[message_lower](sender_id, driver)
             elif state:
                 command = state["command"]
                 step = state["step"]

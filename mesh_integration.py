@@ -40,7 +40,7 @@ def add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver, 
     if not unique_id:
         unique_id = str(uuid.uuid4())
     c.execute(
-        "INSERT INTO mesh_bulletins (board, sender_short_name, date, subject, content, unique_id) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT OR IGNORE INTO mesh_bulletins (board, sender_short_name, date, subject, content, unique_id) VALUES (?, ?, ?, ?, ?, ?)",
         (board, sender_short_name, date, subject, content, unique_id))
     conn.commit()
     if bbs_nodes and driver:
@@ -70,9 +70,22 @@ def get_bulletin_content(bulletin_id):
 def delete_bulletin(bulletin_id, bbs_nodes, driver):
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("DELETE FROM mesh_bulletins WHERE id = ?", (bulletin_id,))
-    conn.commit()
-    send_delete_bulletin_to_bbs_nodes(bulletin_id, bbs_nodes, driver)
+    
+    # Query stable unique_id first
+    c.execute("SELECT unique_id FROM mesh_bulletins WHERE id = ?", (bulletin_id,))
+    result = c.fetchone()
+    if not result:
+        # Check if bulletin_id is already a unique_id (for sync messages)
+        c.execute("SELECT unique_id FROM mesh_bulletins WHERE unique_id = ?", (bulletin_id,))
+        result = c.fetchone()
+        
+    if result:
+        stable_id = result[0]
+        c.execute("DELETE FROM mesh_bulletins WHERE unique_id = ?", (stable_id,))
+        conn.commit()
+        send_delete_bulletin_to_bbs_nodes(stable_id, bbs_nodes, driver)
+    else:
+        logger.warning(f"Attempted to delete non-existent bulletin: {bulletin_id}")
 
 def add_mail(sender_id, sender_short_name, recipient_id, subject, content, bbs_nodes, driver, unique_id=None):
     conn = get_db_connection()
@@ -80,7 +93,7 @@ def add_mail(sender_id, sender_short_name, recipient_id, subject, content, bbs_n
     date = datetime.now().strftime('%Y-%m-%d %H:%M')
     if not unique_id:
         unique_id = str(uuid.uuid4())
-    c.execute("INSERT INTO mesh_mail (sender, sender_short_name, recipient, date, subject, content, unique_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    c.execute("INSERT OR IGNORE INTO mesh_mail (sender, sender_short_name, recipient, date, subject, content, unique_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
               (sender_id, sender_short_name, recipient_id, date, subject, content, unique_id))
     conn.commit()
     if bbs_nodes and driver:
@@ -109,7 +122,12 @@ def delete_mail(unique_id, recipient_id, bbs_nodes, driver):
         if result is None:
             logger.error(f"No mail found with unique_id: {unique_id}")
             return  # Early exit if no matching mail found
-        recipient_id = result[0]
+        
+        db_recipient = result[0]
+        if recipient_id != db_recipient:
+            logger.error(f"Authorization failure: {recipient_id} tried to delete mail for {db_recipient}")
+            return
+
         logger.info(f"Attempting to delete mail with unique_id: {unique_id} by {recipient_id}")
         c.execute("DELETE FROM mesh_mail WHERE unique_id = ? and recipient = ?", (unique_id, recipient_id,))
         conn.commit()

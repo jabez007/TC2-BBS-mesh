@@ -294,7 +294,7 @@ def handle_js8call_command(sender_id, driver):
     update_user_state(sender_id, {"command": "JS8CALL_MENU", "step": 1})
 
 
-def handle_js8call_steps(sender_id, message, step, driver, state):
+def handle_js8call_steps(sender_id, message, step, driver, _state):
     message = message.lower().strip()
     if len(message) == 2 and message[1] == "x":
         message = message[0]
