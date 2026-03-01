@@ -3,6 +3,7 @@ import logging
 import sqlite3
 import sys
 import subprocess
+import shutil
 
 from database_core import get_db_connection, initialize_database
 
@@ -11,11 +12,11 @@ logger = logging.getLogger(__name__)
 def safe_query(conn, sql, params=None):
     """
     Safely executes a query and returns all results.
-    Handles sqlite3.Error and returns an empty list.
+    Handles sqlite3.Error and returns None on failure.
     """
     try:
         c = conn.cursor()
-        if params:
+        if params is not None:
             c.execute(sql, params)
         else:
             c.execute(sql)
@@ -23,7 +24,7 @@ def safe_query(conn, sql, params=None):
     except sqlite3.Error as e:
         logger.exception(f"Database query failed: {sql}")
         print_bold(f"Database error: {e}")
-        return []
+        return None
 
 def list_mesh_bulletins():
     conn = get_db_connection()
@@ -36,6 +37,10 @@ def list_mesh_bulletins():
         "SELECT id, board, sender_short_name, date, subject, unique_id FROM mesh_bulletins"
     )
     
+    if bulletins is None:
+        print_bold("Error retrieving bulletins.")
+        return []
+
     if bulletins:
         print_bold("Mesh Bulletins:")
         for bulletin in bulletins:
@@ -59,6 +64,10 @@ def list_mesh_mail():
         "SELECT id, sender, sender_short_name, recipient, date, subject, unique_id FROM mesh_mail"
     )
     
+    if mail is None:
+        print_bold("Error retrieving mail.")
+        return []
+
     if mail:
         print_bold("Mesh Mail:")
         for m in mail:
@@ -79,6 +88,10 @@ def list_mesh_channels():
     
     channels = safe_query(conn, "SELECT id, name, url FROM mesh_channels")
     
+    if channels is None:
+        print_bold("Error retrieving channels.")
+        return []
+
     if channels:
         print_bold("Mesh Channels:")
         for channel in channels:
@@ -97,6 +110,10 @@ def list_ham_messages():
     
     messages = safe_query(conn, "SELECT id, sender, receiver, message, timestamp FROM ham_messages")
     
+    if messages is None:
+        print_bold("Error retrieving ham messages.")
+        return []
+
     if messages:
         print_bold("Ham Messages:")
         for msg in messages:
@@ -215,15 +232,28 @@ Database Administrator
 
 
 def clear_screen():
-    # Cross-platform screen clearing with ANSI fallback
+    # Cross-platform screen clearing with absolute path resolution and ANSI fallback
     try:
         if os.name == "nt":
-            # Use cmd /c cls on Windows to avoid shell=True while using internal command
-            subprocess.run(["cmd", "/c", "cls"], check=False)
+            # 1. Try resolving via COMSPEC
+            cmd_path = os.environ.get("COMSPEC")
+            if not cmd_path or not os.path.exists(cmd_path):
+                # 2. Fallback to shutil.which search for cmd
+                cmd_path = shutil.which("cmd.exe") or shutil.which("cmd")
+            
+            if cmd_path:
+                subprocess.run([cmd_path, "/c", "cls"], check=False)
+            else:
+                raise OSError("Command interpreter not found")
         else:
-            subprocess.run(["clear"], check=False)
+            # Resolve absolute path for 'clear'
+            clear_path = shutil.which("clear") or shutil.which("reset")
+            if clear_path:
+                subprocess.run([clear_path], check=False)
+            else:
+                raise OSError("Clear command not found")
     except (subprocess.SubprocessError, OSError):
-        # Fallback to direct ANSI sequence if subprocess fails
+        # Fallback to direct ANSI sequence if subprocess fails or commands missing
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
 
@@ -245,7 +275,10 @@ def print_separator():
 
 def main():
     display_banner()
-    initialize_database()
+    if not initialize_database():
+        print_bold("CRITICAL: Failed to initialize database. Exiting.")
+        sys.exit(1)
+
     while True:
         display_menu()
         choice = input_bold("Enter your choice: ")
