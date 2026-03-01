@@ -50,7 +50,7 @@ def get_db_path():
             config.read(config_file)
             db_path = config.get('database', 'db_path', fallback=None)
         except configparser.Error:
-            pass
+            logger.debug(f"Failed to read database config from {config_file}", exc_info=True)
             
     if not db_path:
         db_path = DEFAULT_DB_PATH
