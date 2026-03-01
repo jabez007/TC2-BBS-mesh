@@ -545,6 +545,9 @@ def handle_read_mail_command(sender_id, message, state, driver):
             send_message(response, sender_id, driver)
             send_message("What would you like to do with this message?\n[K]eep  [D]elete  [R]eply", sender_id, driver)
             update_user_state(sender_id, {'command': 'CHECK_MAIL', 'step': 2, 'mail_id': mail_id, 'unique_id': _unique_id, 'sender': sender, 'subject': subject, 'content': content})
+        else:
+            send_message("Message not found or has been deleted.", sender_id, driver)
+            update_user_state(sender_id, {'command': None})
 
     except ValueError:
         send_message("Invalid input. Please enter a valid message number.", sender_id, driver)
@@ -587,6 +590,14 @@ def handle_post_bulletin_command(sender_id, message, driver, bbs_nodes):
             return
 
         _, board_name, subject, content = parts
+        
+        if board_name.lower() == 'urgent':
+            node_id = get_node_id_from_num(sender_id, driver)
+            allowed_nodes = getattr(driver, 'allowed_nodes', [])
+            if allowed_nodes and node_id not in allowed_nodes:
+                send_message("You don't have permission to post to this board.", sender_id, driver)
+                return
+
         sender_short_name = get_node_short_name(get_node_id_from_num(sender_id, driver), driver)
 
         _unique_id = add_bulletin(board_name, sender_short_name, subject, content, bbs_nodes, driver)

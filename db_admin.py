@@ -1,6 +1,7 @@
 import os
 import logging
 import sqlite3
+import sys
 
 from database_core import get_db_connection, initialize_database
 
@@ -196,7 +197,8 @@ Database Administrator
 
 
 def clear_screen():
-    os.system("cls" if os.name == "nt" else "clear")
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
 
 
 def input_bold(prompt):
