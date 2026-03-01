@@ -8,16 +8,34 @@ from database_core import get_db_connection, initialize_database
 
 logger = logging.getLogger(__name__)
 
+def safe_query(conn, sql, params=None):
+    """
+    Safely executes a query and returns all results.
+    Handles sqlite3.Error and returns an empty list.
+    """
+    try:
+        c = conn.cursor()
+        if params:
+            c.execute(sql, params)
+        else:
+            c.execute(sql)
+        return c.fetchall()
+    except sqlite3.Error as e:
+        logger.exception(f"Database query failed: {sql}")
+        print_bold(f"Database error: {e}")
+        return []
+
 def list_mesh_bulletins():
     conn = get_db_connection()
     if not conn:
         print_bold("Database connection unavailable.")
         return []
-    c = conn.cursor()
-    c.execute(
+    
+    bulletins = safe_query(
+        conn,
         "SELECT id, board, sender_short_name, date, subject, unique_id FROM mesh_bulletins"
     )
-    bulletins = c.fetchall()
+    
     if bulletins:
         print_bold("Mesh Bulletins:")
         for bulletin in bulletins:
@@ -35,11 +53,12 @@ def list_mesh_mail():
     if not conn:
         print_bold("Database connection unavailable.")
         return []
-    c = conn.cursor()
-    c.execute(
+    
+    mail = safe_query(
+        conn,
         "SELECT id, sender, sender_short_name, recipient, date, subject, unique_id FROM mesh_mail"
     )
-    mail = c.fetchall()
+    
     if mail:
         print_bold("Mesh Mail:")
         for m in mail:
@@ -57,9 +76,9 @@ def list_mesh_channels():
     if not conn:
         print_bold("Database connection unavailable.")
         return []
-    c = conn.cursor()
-    c.execute("SELECT id, name, url FROM mesh_channels")
-    channels = c.fetchall()
+    
+    channels = safe_query(conn, "SELECT id, name, url FROM mesh_channels")
+    
     if channels:
         print_bold("Mesh Channels:")
         for channel in channels:
@@ -75,9 +94,9 @@ def list_ham_messages():
     if not conn:
         print_bold("Database connection unavailable.")
         return []
-    c = conn.cursor()
-    c.execute("SELECT id, sender, receiver, message, timestamp FROM ham_messages")
-    messages = c.fetchall()
+    
+    messages = safe_query(conn, "SELECT id, sender, receiver, message, timestamp FROM ham_messages")
+    
     if messages:
         print_bold("Ham Messages:")
         for msg in messages:
@@ -199,10 +218,11 @@ def clear_screen():
     # Cross-platform screen clearing with ANSI fallback
     try:
         if os.name == "nt":
-            subprocess.run(["cls"], check=False, shell=True)
+            # Use cmd /c cls on Windows to avoid shell=True while using internal command
+            subprocess.run(["cmd", "/c", "cls"], check=False)
         else:
             subprocess.run(["clear"], check=False)
-    except Exception:
+    except (subprocess.SubprocessError, OSError):
         # Fallback to direct ANSI sequence if subprocess fails
         sys.stdout.write("\033[2J\033[H")
         sys.stdout.flush()
