@@ -195,8 +195,16 @@ Database Administrator
 
 
 def clear_screen():
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+    # Cross-platform screen clearing with ANSI fallback
+    try:
+        if os.name == "nt":
+            os.system("cls")
+        else:
+            os.system("clear")
+    except Exception:
+        # Fallback to direct ANSI sequence if os.system fails
+        sys.stdout.write("\033[2J\033[H")
+        sys.stdout.flush()
 
 
 def input_bold(prompt):

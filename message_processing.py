@@ -211,7 +211,7 @@ def process_message(sender_id, message, driver, is_sync_message=False):
                     logger.warning(f"Malformed CHANNEL sync message: {message}")
                     return
                 channel_name, channel_url = parts[1], parts[2]
-                add_channel(channel_name, channel_url)
+                add_channel(channel_name, channel_url, bbs_nodes=[], driver=None)
         except (IndexError, ValueError):
             logger.warning(f"Error parsing sync message: {message}")
     else:
