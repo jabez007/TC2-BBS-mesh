@@ -235,16 +235,26 @@ def clear_screen():
     # Cross-platform screen clearing with absolute path resolution and ANSI fallback
     try:
         if os.name == "nt":
-            # 1. Try resolving via COMSPEC
-            cmd_path = os.environ.get("COMSPEC")
-            if not cmd_path or not os.path.exists(cmd_path):
-                # 2. Fallback to shutil.which search for cmd
-                cmd_path = shutil.which("cmd.exe") or shutil.which("cmd")
+            # 1. Try canonical System32 location
+            system_root = os.environ.get("SystemRoot", "C:\\Windows")
+            cmd_path = os.path.join(system_root, "System32", "cmd.exe")
             
-            if cmd_path:
+            if not os.path.exists(cmd_path):
+                # 2. Fallback to shutil.which but validate path
+                found_path = shutil.which("cmd.exe") or shutil.which("cmd")
+                if found_path:
+                    resolved_path = os.path.realpath(found_path)
+                    if resolved_path.lower().startswith(system_root.lower()):
+                        cmd_path = resolved_path
+                    else:
+                        cmd_path = None
+                else:
+                    cmd_path = None
+            
+            if cmd_path and os.path.exists(cmd_path):
                 subprocess.run([cmd_path, "/c", "cls"], check=False)
             else:
-                raise OSError("Command interpreter not found")
+                raise OSError("Trusted command interpreter not found")
         else:
             # Resolve absolute path for 'clear'
             clear_path = shutil.which("clear") or shutil.which("reset")
@@ -278,7 +288,7 @@ def main():
     if not initialize_database():
         print_bold("CRITICAL: Failed to initialize database. Exiting.")
         sys.exit(1)
-
+        
     while True:
         display_menu()
         choice = input_bold("Enter your choice: ")

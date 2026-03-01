@@ -89,9 +89,14 @@ def get_db_connection():
                     conn.close()
                     continue
 
-                thread_local.connection = conn
-                thread_local.conn_version = current_version
                 with _connections_lock:
+                    # Final race check under lock before registering
+                    if _db_path_version != current_version:
+                        conn.close()
+                        continue
+                    
+                    thread_local.connection = conn
+                    thread_local.conn_version = current_version
                     _connections[threading.get_ident()] = conn
                 break
             except sqlite3.Error:
@@ -104,11 +109,11 @@ def close_db_connection():
         try:
             conn = thread_local.connection
             conn.close()
-            with _connections_lock:
-                _connections.pop(threading.get_ident(), None)
         except sqlite3.Error:
             logger.exception("Error closing database connection")
         finally:
+            with _connections_lock:
+                _connections.pop(threading.get_ident(), None)
             thread_local.connection = None
 
 def _migrate_legacy_data(conn):
