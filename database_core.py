@@ -64,7 +64,6 @@ def get_db_path():
 
 def get_db_connection():
     global _db_path_version
-    db_path = get_db_path()
     
     # Check if we need to discard current connection due to path change
     if hasattr(thread_local, 'connection') and thread_local.connection is not None:
@@ -78,6 +77,7 @@ def get_db_connection():
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
         while True:
             current_version = _db_path_version
+            db_path = get_db_path()
             try:
                 conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
                 # Enable Write-Ahead Logging (WAL) for better concurrency
@@ -87,7 +87,6 @@ def get_db_connection():
                 # Re-check version to ensure the path hasn't changed during connection setup
                 if _db_path_version != current_version:
                     conn.close()
-                    db_path = get_db_path() # Update path for next attempt
                     continue
 
                 thread_local.connection = conn
