@@ -166,66 +166,71 @@ def _migrate_legacy_data(conn):
 def initialize_database():
     conn = get_db_connection()
     if conn is None:
-        return
+        return False
     
-    c = conn.cursor()
-    # Meshtastic tables (mesh_ prefix)
-    c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    board TEXT NOT NULL,
-                    sender_short_name TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    subject TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    unique_id TEXT NOT NULL UNIQUE
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS mesh_mail (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender TEXT NOT NULL,
-                    sender_short_name TEXT NOT NULL,
-                    recipient TEXT NOT NULL,
-                    date TEXT NOT NULL,
-                    subject TEXT NOT NULL,
-                    content TEXT NOT NULL,
-                    unique_id TEXT NOT NULL UNIQUE
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS mesh_channels (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    name TEXT NOT NULL,
-                    url TEXT NOT NULL
-                )''')
-    
-    # Create indexes for hot filter columns
-    c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_bulletins_board ON mesh_bulletins(board)')
-    c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_mail_recipient ON mesh_mail(recipient)')
-    
-    # JS8Call tables (ham_ prefix)
-    c.execute('''CREATE TABLE IF NOT EXISTS ham_messages (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender TEXT,
-                    receiver TEXT,
-                    message TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS ham_groups (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender TEXT,
-                    groupname TEXT,
-                    message TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS ham_urgent (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    sender TEXT,
-                    groupname TEXT,
-                    message TEXT,
-                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-                )''')
-    
-    # Commit table creation before starting migration transaction
-    conn.commit()
-    
-    # Migrations are self-committing or rolling back
-    _migrate_legacy_data(conn)
-    
-    logger.info("Database schema initialized with mesh_ and ham_ prefixes.")
+    try:
+        c = conn.cursor()
+        # Meshtastic tables (mesh_ prefix)
+        c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        board TEXT NOT NULL,
+                        sender_short_name TEXT NOT NULL,
+                        date TEXT NOT NULL,
+                        subject TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        unique_id TEXT NOT NULL UNIQUE
+                    )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS mesh_mail (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sender TEXT NOT NULL,
+                        sender_short_name TEXT NOT NULL,
+                        recipient TEXT NOT NULL,
+                        date TEXT NOT NULL,
+                        subject TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        unique_id TEXT NOT NULL UNIQUE
+                    )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS mesh_channels (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL,
+                        url TEXT NOT NULL
+                    )''')
+        
+        # Create indexes for hot filter columns
+        c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_bulletins_board ON mesh_bulletins(board)')
+        c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_mail_recipient ON mesh_mail(recipient)')
+        
+        # JS8Call tables (ham_ prefix)
+        c.execute('''CREATE TABLE IF NOT EXISTS ham_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sender TEXT,
+                        receiver TEXT,
+                        message TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS ham_groups (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sender TEXT,
+                        groupname TEXT,
+                        message TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        c.execute('''CREATE TABLE IF NOT EXISTS ham_urgent (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        sender TEXT,
+                        groupname TEXT,
+                        message TEXT,
+                        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )''')
+        
+        # Commit table creation before starting migration transaction
+        conn.commit()
+        
+        # Migrations are self-committing or rolling back
+        _migrate_legacy_data(conn)
+        
+        logger.info("Database schema initialized with mesh_ and ham_ prefixes.")
+        return True
+    except sqlite3.Error:
+        logger.exception("Failed to initialize database schema")
+        return False
