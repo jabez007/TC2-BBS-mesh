@@ -124,21 +124,19 @@ def _delete_records(table_name, record_type, id_list_str):
         return
     
     try:
-        c = conn.cursor()
-        c.execute("BEGIN")
-        deleted_count = 0
-        for record_id in valid_ids:
-            # table_name is whitelisted above
-            c.execute(f"DELETE FROM {table_name} WHERE id = ?", (record_id,))
-            if c.rowcount > 0:
-                deleted_count += 1
+        with conn:
+            c = conn.cursor()
+            deleted_count = 0
+            for record_id in valid_ids:
+                # table_name is whitelisted above
+                c.execute(f"DELETE FROM {table_name} WHERE id = ?", (record_id,))
+                if c.rowcount > 0:
+                    deleted_count += 1
         
-        conn.commit()
         print_bold(f"Successfully deleted {deleted_count} {record_type}(s).")
         if deleted_count < len(valid_ids):
             print_bold(f"Note: {len(valid_ids) - deleted_count} ID(s) were not found in the database.")
     except sqlite3.Error as e:
-        conn.rollback()
         print_bold(f"Database error during deletion: {e}")
         logger.exception("Bulk delete failed")
     

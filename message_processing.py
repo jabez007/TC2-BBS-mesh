@@ -389,7 +389,7 @@ def _process_received_packet(packet, driver):
                 to_id is not None
                 and to_id != 0
                 and to_id != 255
-                and to_id == driver.myInfo.my_node_num
+                and to_id == driver.get_my_node_num()
             ):
                 process_message(
                     sender_id, message_string, driver, is_sync_message=False

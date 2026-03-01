@@ -17,16 +17,25 @@ from database_core import get_db_connection, initialize_database
 
 def add_channel(name, url, bbs_nodes=None, driver=None):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in add_channel")
+        return False
+    
     c = conn.cursor()
     c.execute("INSERT INTO mesh_channels (name, url) VALUES (?, ?)", (name, url))
     conn.commit()
 
     if bbs_nodes and driver:
         send_channel_to_bbs_nodes(name, url, bbs_nodes, driver)
+    return True
 
 
 def get_channels():
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in get_channels")
+        return []
+    
     c = conn.cursor()
     c.execute("SELECT name, url FROM mesh_channels")
     return c.fetchall()
@@ -35,6 +44,10 @@ def get_channels():
 
 def add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver, unique_id=None):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in add_bulletin")
+        return None
+    
     c = conn.cursor()
     date = datetime.now().strftime('%Y-%m-%d %H:%M')
     if not unique_id:
@@ -56,12 +69,20 @@ def add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver, 
 
 def get_bulletins(board):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in get_bulletins")
+        return []
+    
     c = conn.cursor()
     c.execute("SELECT id, subject, sender_short_name, date, unique_id FROM mesh_bulletins WHERE board = ? COLLATE NOCASE", (board,))
     return c.fetchall()
 
 def get_bulletin_content(bulletin_id):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in get_bulletin_content")
+        return None
+    
     c = conn.cursor()
     c.execute("SELECT sender_short_name, date, subject, content, unique_id FROM mesh_bulletins WHERE id = ?", (bulletin_id,))
     return c.fetchone()
@@ -69,6 +90,10 @@ def get_bulletin_content(bulletin_id):
 
 def delete_bulletin(bulletin_id, bbs_nodes, driver):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in delete_bulletin")
+        return False
+    
     c = conn.cursor()
     
     # Query stable unique_id first
@@ -84,11 +109,17 @@ def delete_bulletin(bulletin_id, bbs_nodes, driver):
         c.execute("DELETE FROM mesh_bulletins WHERE unique_id = ?", (stable_id,))
         conn.commit()
         send_delete_bulletin_to_bbs_nodes(stable_id, bbs_nodes, driver)
+        return True
     else:
         logger.warning(f"Attempted to delete non-existent bulletin: {bulletin_id}")
+        return False
 
 def add_mail(sender_id, sender_short_name, recipient_id, subject, content, bbs_nodes, driver, unique_id=None):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in add_mail")
+        return None
+    
     c = conn.cursor()
     date = datetime.now().strftime('%Y-%m-%d %H:%M')
     if not unique_id:
@@ -102,6 +133,10 @@ def add_mail(sender_id, sender_short_name, recipient_id, subject, content, bbs_n
 
 def get_mail(recipient_id):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in get_mail")
+        return []
+    
     c = conn.cursor()
     c.execute("SELECT id, sender_short_name, subject, date, unique_id FROM mesh_mail WHERE recipient = ?", (recipient_id,))
     return c.fetchall()
@@ -109,30 +144,39 @@ def get_mail(recipient_id):
 def get_mail_content(mail_id, recipient_id):
     # TODO: ensure only recipient can read mail
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in get_mail_content")
+        return None
+    
     c = conn.cursor()
     c.execute("SELECT sender_short_name, date, subject, content, unique_id FROM mesh_mail WHERE id = ? and recipient = ?", (mail_id, recipient_id,))
     return c.fetchone()
 
 def delete_mail(unique_id, recipient_id, bbs_nodes, driver):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in delete_mail")
+        return False
+    
     c = conn.cursor()
     try:
         c.execute("SELECT recipient FROM mesh_mail WHERE unique_id = ?", (unique_id,))
         result = c.fetchone()
         if result is None:
             logger.error(f"No mail found with unique_id: {unique_id}")
-            return  # Early exit if no matching mail found
+            return False # Early exit if no matching mail found
         
         db_recipient = result[0]
         if recipient_id != db_recipient:
             logger.error(f"Authorization failure: {recipient_id} tried to delete mail for {db_recipient}")
-            return
+            return False
 
         logger.info(f"Attempting to delete mail with unique_id: {unique_id} by {recipient_id}")
         c.execute("DELETE FROM mesh_mail WHERE unique_id = ? and recipient = ?", (unique_id, recipient_id,))
         conn.commit()
         send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, driver)
         logger.info(f"Mail with unique_id: {unique_id} deleted and sync message sent.")
+        return True
     except Exception:
         logger.exception(f"Error deleting mail with unique_id {unique_id}")
         raise
@@ -140,10 +184,13 @@ def delete_mail(unique_id, recipient_id, bbs_nodes, driver):
 
 def get_sender_id_by_mail_id(mail_id):
     conn = get_db_connection()
+    if not conn:
+        logger.error("Database connection unavailable in get_sender_id_by_mail_id")
+        return None
+    
     c = conn.cursor()
     c.execute("SELECT sender FROM mesh_mail WHERE id = ?", (mail_id,))
     result = c.fetchone()
     if result:
         return result[0]
     return None
-
