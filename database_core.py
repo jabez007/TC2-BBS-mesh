@@ -76,19 +76,28 @@ def get_db_connection():
             thread_local.connection = None
 
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
-        try:
-            conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
-            # Enable Write-Ahead Logging (WAL) for better concurrency
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA synchronous=NORMAL")
-            
-            thread_local.connection = conn
-            thread_local.conn_version = _db_path_version
-            with _connections_lock:
-                _connections[threading.get_ident()] = conn
-        except sqlite3.Error:
-            logger.exception(f"Failed to connect to database at {db_path}")
-            return None
+        while True:
+            current_version = _db_path_version
+            try:
+                conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+                # Enable Write-Ahead Logging (WAL) for better concurrency
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+                
+                # Re-check version to ensure the path hasn't changed during connection setup
+                if _db_path_version != current_version:
+                    conn.close()
+                    db_path = get_db_path() # Update path for next attempt
+                    continue
+
+                thread_local.connection = conn
+                thread_local.conn_version = current_version
+                with _connections_lock:
+                    _connections[threading.get_ident()] = conn
+                break
+            except sqlite3.Error:
+                logger.exception(f"Failed to connect to database at {db_path}")
+                return None
     return thread_local.connection
 
 def close_db_connection():
@@ -123,8 +132,8 @@ def _migrate_legacy_data(conn):
     try:
         migrated_any = False
         for old_table, new_table, cols in migrations:
-            # Check if old table exists
-            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{old_table}'")
+            # Check if old table exists using a parameterized query
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (old_table,))
             if cursor.fetchone():
                 logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
                 
