@@ -5,7 +5,7 @@ import sys
 import subprocess
 import shutil
 
-from database_core import get_db_connection, initialize_database
+from database_core import get_db_connection, initialize_database, close_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +299,6 @@ def main():
                 print_bold("Invalid choice. Please try again.")
                 print_separator()
     finally:
-        from database_core import close_db_connection
         close_db_connection()
 
 
