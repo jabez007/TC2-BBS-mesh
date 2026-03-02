@@ -26,31 +26,38 @@ def safe_query(conn, sql, params=None):
         print_bold(f"Database error: {e}")
         return None
 
+def render_list_query(conn, sql, header, row_formatter):
+    """
+    Centralized helper to execute a query, check for errors, and render results.
+    """
+    results = safe_query(conn, sql)
+    
+    if results is None:
+        print_bold(f"Error retrieving {header.lower()}.")
+        return []
+
+    if results:
+        print_bold(f"{header}:")
+        for row in results:
+            row_formatter(row)
+    else:
+        print_bold(f"No {header.lower()} found.")
+    
+    print_separator()
+    return results
+
 def list_mesh_bulletins():
     conn = get_db_connection()
     if not conn:
         print_bold("Database connection unavailable.")
         return []
     
-    bulletins = safe_query(
+    return render_list_query(
         conn,
-        "SELECT id, board, sender_short_name, date, subject, unique_id FROM mesh_bulletins"
+        "SELECT id, board, sender_short_name, date, subject, unique_id FROM mesh_bulletins",
+        "Mesh Bulletins",
+        lambda row: print_bold(f"(ID: {row[0]}, Board: {row[1]}, Poster: {row[2]}, Subject: {row[4]})")
     )
-    
-    if bulletins is None:
-        print_bold("Error retrieving bulletins.")
-        return []
-
-    if bulletins:
-        print_bold("Mesh Bulletins:")
-        for bulletin in bulletins:
-            print_bold(
-                f"(ID: {bulletin[0]}, Board: {bulletin[1]}, Poster: {bulletin[2]}, Subject: {bulletin[4]})"
-            )
-    else:
-        print_bold("No mesh bulletins found.")
-    print_separator()
-    return bulletins
 
 
 def list_mesh_mail():
@@ -59,25 +66,12 @@ def list_mesh_mail():
         print_bold("Database connection unavailable.")
         return []
     
-    mail = safe_query(
+    return render_list_query(
         conn,
-        "SELECT id, sender, sender_short_name, recipient, date, subject, unique_id FROM mesh_mail"
+        "SELECT id, sender, sender_short_name, recipient, date, subject, unique_id FROM mesh_mail",
+        "Mesh Mail",
+        lambda row: print_bold(f"(ID: {row[0]}, Sender: {row[2]}, Recipient: {row[3]}, Subject: {row[5]})")
     )
-    
-    if mail is None:
-        print_bold("Error retrieving mail.")
-        return []
-
-    if mail:
-        print_bold("Mesh Mail:")
-        for m in mail:
-            print_bold(
-                f"(ID: {m[0]}, Sender: {m[2]}, Recipient: {m[3]}, Subject: {m[5]})"
-            )
-    else:
-        print_bold("No mesh mail found.")
-    print_separator()
-    return mail
 
 
 def list_mesh_channels():
@@ -86,20 +80,12 @@ def list_mesh_channels():
         print_bold("Database connection unavailable.")
         return []
     
-    channels = safe_query(conn, "SELECT id, name, url FROM mesh_channels")
-    
-    if channels is None:
-        print_bold("Error retrieving channels.")
-        return []
-
-    if channels:
-        print_bold("Mesh Channels:")
-        for channel in channels:
-            print_bold(f"(ID: {channel[0]}, Name: {channel[1]}, URL: {channel[2]})")
-    else:
-        print_bold("No mesh channels found.")
-    print_separator()
-    return channels
+    return render_list_query(
+        conn,
+        "SELECT id, name, url FROM mesh_channels",
+        "Mesh Channels",
+        lambda row: print_bold(f"(ID: {row[0]}, Name: {row[1]}, URL: {row[2]})")
+    )
 
 
 def list_ham_messages():
@@ -108,20 +94,12 @@ def list_ham_messages():
         print_bold("Database connection unavailable.")
         return []
     
-    messages = safe_query(conn, "SELECT id, sender, receiver, message, timestamp FROM ham_messages")
-    
-    if messages is None:
-        print_bold("Error retrieving ham messages.")
-        return []
-
-    if messages:
-        print_bold("Ham Messages:")
-        for msg in messages:
-            print_bold(f"(ID: {msg[0]}, From: {msg[1]}, To: {msg[2]}, Msg: {msg[3]})")
-    else:
-        print_bold("No ham messages found.")
-    print_separator()
-    return messages
+    return render_list_query(
+        conn,
+        "SELECT id, sender, receiver, message, timestamp FROM ham_messages",
+        "Ham Messages",
+        lambda row: print_bold(f"(ID: {row[0]}, From: {row[1]}, To: {row[2]}, Msg: {row[3]})")
+    )
 
 
 ALLOWED_TABLES = ("mesh_bulletins", "mesh_mail", "mesh_channels", "ham_messages")
@@ -247,9 +225,13 @@ def clear_screen():
                     # Use commonpath to ensure resolved_path is truly within system_root
                     norm_resolved = os.path.normcase(resolved_path)
                     norm_root = os.path.normcase(system_root)
-                    if os.path.commonpath([norm_resolved, norm_root]) == norm_root:
-                        cmd_path = resolved_path
-                    else:
+                    try:
+                        if os.path.commonpath([norm_resolved, norm_root]) == norm_root:
+                            cmd_path = resolved_path
+                        else:
+                            cmd_path = None
+                    except ValueError:
+                        # Drive letters differ on Windows, commonpath raises ValueError
                         cmd_path = None
                 else:
                     cmd_path = None
