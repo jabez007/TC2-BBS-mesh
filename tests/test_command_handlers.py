@@ -53,5 +53,6 @@ def test_handle_check_bulletin_command_invalid_board_error(mock_db):
     
     with patch('command_handlers.send_message') as mock_send_message:
         command_handlers.handle_check_bulletin_command(sender_id, message, interface)
-        # Original code catches the StopIteration and sends a generic error message
-        mock_send_message.assert_called_with("Error processing check bulletin command.", sender_id, interface)
+        # The updated code sends a specific error message when the board is not found
+        expected_msg = "Board 'Invalidboard' not found. Valid boards: General, Info, News, Urgent"
+        mock_send_message.assert_called_with(expected_msg, sender_id, interface)
