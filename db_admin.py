@@ -141,12 +141,10 @@ def _delete_records(table_name, record_type, id_list_str):
     try:
         with conn:
             c = conn.cursor()
-            deleted_count = 0
-            for record_id in valid_ids:
-                # table_name is whitelisted above
-                c.execute(f"DELETE FROM {table_name} WHERE id = ?", (record_id,))
-                if c.rowcount > 0:
-                    deleted_count += 1
+            placeholders = ",".join(["?" for _ in valid_ids])
+            sql = f"DELETE FROM {table_name} WHERE id IN ({placeholders})"
+            c.execute(sql, tuple(valid_ids))
+            deleted_count = c.rowcount
         
         print_bold(f"Successfully deleted {deleted_count} {record_type}(s).")
         if deleted_count < len(valid_ids):
