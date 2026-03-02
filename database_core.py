@@ -75,7 +75,9 @@ def get_db_connection():
             thread_local.connection = None
 
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
-        while True:
+        max_retries = 5
+        retry_count = 0
+        while retry_count < max_retries:
             current_version = _db_path_version
             db_path = get_db_path()
             try:
@@ -87,12 +89,16 @@ def get_db_connection():
                 # Re-check version to ensure the path hasn't changed during connection setup
                 if _db_path_version != current_version:
                     conn.close()
+                    retry_count += 1
+                    time.sleep(0.1)
                     continue
 
                 with _connections_lock:
                     # Final race check under lock before registering
                     if _db_path_version != current_version:
                         conn.close()
+                        retry_count += 1
+                        time.sleep(0.1)
                         continue
                     
                     thread_local.connection = conn
@@ -102,6 +108,10 @@ def get_db_connection():
             except sqlite3.Error:
                 logger.exception(f"Failed to connect to database at {db_path}")
                 return None
+        
+        if retry_count >= max_retries:
+            logger.error(f"Exceeded max retries ({max_retries}) to obtain database connection due to path changes.")
+            return None
     return thread_local.connection
 
 def close_db_connection():
@@ -148,12 +158,22 @@ def _migrate_legacy_data(conn):
                 # Deduplication strategy:
                 # 1. Mesh tables (mesh_bulletins, mesh_mail) have a UNIQUE(unique_id) constraint.
                 # 2. Ham tables (ham_messages, ham_groups, ham_urgent) and channels do not.
-                # We use INSERT OR IGNORE for mesh tables and a SELECT DISTINCT approach for the others.
+                # We use INSERT OR IGNORE for mesh tables and a WHERE NOT EXISTS approach for the others.
                 if new_table in ('mesh_bulletins', 'mesh_mail'):
                     cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
                 else:
-                    # For ham tables and channels, avoid exact duplicate rows during migration
-                    cursor.execute(f"INSERT INTO {new_table} ({cols}) SELECT DISTINCT {cols} FROM {old_table}")
+                    # For ham tables and channels, avoid re-inserting rows that already exist in the destination.
+                    # We match on all migrated columns to ensure rows are truly identical.
+                    col_list = [c.strip() for c in cols.split(',')]
+                    where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
+                    cursor.execute(f"""
+                        INSERT INTO {new_table} ({cols}) 
+                        SELECT {cols} FROM {old_table} o 
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM {new_table} n 
+                            WHERE {where_clause}
+                        )
+                    """)
                 
                 # Rename old table to prevent repeated migrations
                 cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")

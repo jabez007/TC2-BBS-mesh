@@ -244,7 +244,10 @@ def clear_screen():
                 found_path = shutil.which("cmd.exe") or shutil.which("cmd")
                 if found_path:
                     resolved_path = os.path.realpath(found_path)
-                    if resolved_path.lower().startswith(system_root.lower()):
+                    # Use commonpath to ensure resolved_path is truly within system_root
+                    norm_resolved = os.path.normcase(resolved_path)
+                    norm_root = os.path.normcase(system_root)
+                    if os.path.commonpath([norm_resolved, norm_root]) == norm_root:
                         cmd_path = resolved_path
                     else:
                         cmd_path = None
@@ -285,35 +288,39 @@ def print_separator():
 
 def main():
     display_banner()
-    if not initialize_database():
-        print_bold("CRITICAL: Failed to initialize database. Exiting.")
-        sys.exit(1)
-        
-    while True:
-        display_menu()
-        choice = input_bold("Enter your choice: ")
-        clear_screen()
-        if choice == "1":
-            list_mesh_bulletins()
-        elif choice == "2":
-            list_mesh_mail()
-        elif choice == "3":
-            list_mesh_channels()
-        elif choice == "4":
-            list_ham_messages()
-        elif choice == "5":
-            delete_mesh_bulletin()
-        elif choice == "6":
-            delete_mesh_mail()
-        elif choice == "7":
-            delete_mesh_channel()
-        elif choice == "8":
-            delete_ham_message()
-        elif choice == "9":
-            break
-        else:
-            print_bold("Invalid choice. Please try again.")
-            print_separator()
+    try:
+        if not initialize_database():
+            print_bold("CRITICAL: Failed to initialize database. Exiting.")
+            sys.exit(1)
+            
+        while True:
+            display_menu()
+            choice = input_bold("Enter your choice: ")
+            clear_screen()
+            if choice == "1":
+                list_mesh_bulletins()
+            elif choice == "2":
+                list_mesh_mail()
+            elif choice == "3":
+                list_mesh_channels()
+            elif choice == "4":
+                list_ham_messages()
+            elif choice == "5":
+                delete_mesh_bulletin()
+            elif choice == "6":
+                delete_mesh_mail()
+            elif choice == "7":
+                delete_mesh_channel()
+            elif choice == "8":
+                delete_ham_message()
+            elif choice == "9":
+                break
+            else:
+                print_bold("Invalid choice. Please try again.")
+                print_separator()
+    finally:
+        from database_core import close_db_connection
+        close_db_connection()
 
 
 if __name__ == "__main__":
