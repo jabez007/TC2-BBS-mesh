@@ -31,6 +31,7 @@ def set_db_path(path):
     # Also clear for current thread if it exists
     if hasattr(thread_local, 'connection'):
         thread_local.connection = None
+        thread_local.conn_version = None
 
 def get_db_path():
     # Resolve relative to this module's directory
@@ -94,17 +95,21 @@ def get_db_connection():
                     time.sleep(0.1)
                     continue
 
+                retry_needed = False
                 with _connections_lock:
                     # Final race check under lock before registering
                     if _db_path_version != current_version:
                         conn.close()
                         retry_count += 1
-                        time.sleep(0.1)
-                        continue
-                    
-                    thread_local.connection = conn
-                    thread_local.conn_version = current_version
-                    _connections[threading.get_ident()] = conn
+                        retry_needed = True
+                    else:
+                        thread_local.connection = conn
+                        thread_local.conn_version = current_version
+                        _connections[threading.get_ident()] = conn
+                
+                if retry_needed:
+                    time.sleep(0.1)
+                    continue
                 break
             except sqlite3.Error:
                 logger.exception(f"Failed to connect to database at {db_path}")
