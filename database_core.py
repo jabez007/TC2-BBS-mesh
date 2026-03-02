@@ -115,6 +115,7 @@ def close_db_connection():
             with _connections_lock:
                 _connections.pop(threading.get_ident(), None)
             thread_local.connection = None
+            thread_local.conn_version = None
 
 def _migrate_legacy_data(conn):
     """
