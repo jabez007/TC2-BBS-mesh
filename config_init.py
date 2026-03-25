@@ -46,14 +46,24 @@ def init_cli_parser() -> argparse.Namespace:
         default=None)
     
     parser.add_argument(
-        "--mqtt-topic", '-t', 
+        "--mqtt-topic", "-t",
         action="store",
         help="MQTT topic to subscribe",
-        default='meshtastic.receive')
-    #
-    # Add extra arguments here
-    #...
-    
+        default="meshtastic.receive")
+
+    parser.add_argument(
+        "--heartbeat-interval",
+        action="store",
+        type=int,
+        help="Heartbeat interval in seconds (default: 10)",
+        default=None)
+
+    parser.add_argument(
+        "--low-power",
+        action="store_true",
+        help="Enable low power mode (increases intervals)",
+        default=False)
+
     args = parser.parse_args()
     
     return args
@@ -81,7 +91,13 @@ def merge_config(system_config:dict[str, Any], args:argparse.Namespace) -> dict[
         
     if args.host is not None:
         system_config['hostname'] = args.host
-    
+
+    if args.heartbeat_interval is not None:
+        system_config['heartbeat_interval'] = args.heartbeat_interval
+
+    if args.low_power:
+        system_config['low_power'] = True
+
     return system_config
 
 
@@ -124,6 +140,10 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
 
     print(f"Nodes with Urgent board permissions: {allowed_nodes}")
 
+    # Healthcheck settings
+    heartbeat_interval = config.getint('healthcheck', 'heartbeat_interval', fallback=10)
+    low_power = config.getboolean('healthcheck', 'low_power', fallback=False)
+
     return {
         'config': config,
         'interface_type': interface_type,
@@ -131,7 +151,9 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
         'port': port,
         'bbs_nodes': bbs_nodes,
         'allowed_nodes': allowed_nodes,
-        'mqtt_topic': 'meshtastic.receive'
+        'mqtt_topic': 'meshtastic.receive',
+        'heartbeat_interval': heartbeat_interval,
+        'low_power': low_power
     }
 
 
