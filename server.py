@@ -133,7 +133,14 @@ def main():
         KEEPALIVE_INTERVAL = 120
 
     # Heartbeat and Low Power configuration
-    HEARTBEAT_INTERVAL = system_config.get('heartbeat_interval', 10)
+    try:
+        HEARTBEAT_INTERVAL = int(system_config.get('heartbeat_interval', 10))
+        if HEARTBEAT_INTERVAL <= 0:
+            logger.warning("heartbeat_interval must be positive. Falling back to default (10).")
+            HEARTBEAT_INTERVAL = 10
+    except (ValueError, TypeError):
+        HEARTBEAT_INTERVAL = 10
+
     LOW_POWER = system_config.get('low_power', False)
 
     if LOW_POWER:
@@ -143,6 +150,10 @@ def main():
         WATCHDOG_TIMEOUT = max(WATCHDOG_TIMEOUT, 600)
         logger.info(f"Low power mode enabled. Adjusting intervals: Heartbeat={HEARTBEAT_INTERVAL}s, Keepalive={KEEPALIVE_INTERVAL}s, Watchdog={WATCHDOG_TIMEOUT}s")
     
+    # Alert if heartbeat is too slow for the healthcheck (docker/healthcheck.py uses max_age=60)
+    if HEARTBEAT_INTERVAL >= 55:
+        logger.warning(f"HEARTBEAT_INTERVAL ({HEARTBEAT_INTERVAL}s) is near or exceeds docker/healthcheck.py max_age (60s). This may cause false healthcheck failures.")
+
     logger.info(f"Watchdog timeout: {WATCHDOG_TIMEOUT}s, Keepalive interval: {KEEPALIVE_INTERVAL}s, Heartbeat interval: {HEARTBEAT_INTERVAL}s")
 
     # Track last received packet for a deep health check (protected by last_rx_lock)
