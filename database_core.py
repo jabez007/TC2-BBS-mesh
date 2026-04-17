@@ -16,9 +16,16 @@ DEFAULT_DB_PATH = 'bbs.db'
 _custom_db_path = None
 
 def set_db_path(path):
+    """
+    Sets a custom path for the SQLite database and invalidates all existing connections.
+
+    Args:
+        path (str): The new filesystem path for the database.
+    """
     global _custom_db_path, _db_path_version
     _custom_db_path = path
-    # Close and clear all tracked connections
+    
+    # Invalidate existing connections across all threads to ensure the new path is picked up immediately.
     with _connections_lock:
         for tid, conn in list(_connections.items()):
             try:
@@ -28,13 +35,18 @@ def set_db_path(path):
         _connections.clear()
         _db_path_version += 1
     
-    # Also clear for current thread if it exists
     if hasattr(thread_local, 'connection'):
         thread_local.connection = None
         thread_local.conn_version = None
 
 def get_db_path():
-    # Resolve relative to this module's directory
+    """
+    Resolves the effective path for the SQLite database based on environment, 
+    config, or defaults.
+
+    Returns:
+        str: Absolute path to the database file.
+    """
     module_dir = Path(__file__).parent.resolve()
     
     if _custom_db_path:
@@ -57,7 +69,6 @@ def get_db_path():
     if not db_path:
         db_path = DEFAULT_DB_PATH
         
-    # If the path is relative, resolve it against the module directory
     path_obj = Path(db_path)
     if not path_obj.is_absolute():
         path_obj = (module_dir / path_obj).resolve()
@@ -65,9 +76,15 @@ def get_db_path():
     return str(path_obj)
 
 def get_db_connection():
+    """
+    Provides a thread-local SQLite connection, creating it if necessary.
+    Uses WAL mode for better concurrency in multi-process/multi-thread environments.
+
+    Returns:
+        sqlite3.Connection: The active thread-local connection, or None on failure.
+    """
     global _db_path_version
     
-    # Check if we need to discard current connection due to path change
     if hasattr(thread_local, 'connection') and thread_local.connection is not None:
         if getattr(thread_local, 'conn_version', -1) != _db_path_version:
             try:
@@ -84,11 +101,12 @@ def get_db_connection():
             db_path = get_db_path()
             try:
                 conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
-                # Enable Write-Ahead Logging (WAL) for better concurrency
+                # WAL mode is essential for allowing simultaneous reads/writes in a shared BBS environment.
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
                 
-                # Re-check version to ensure the path hasn't changed during connection setup
+                # Verify the path version again after setup to prevent using a connection 
+                # that was invalidated during the relatively slow connect() call.
                 if _db_path_version != current_version:
                     conn.close()
                     retry_count += 1
@@ -97,7 +115,6 @@ def get_db_connection():
 
                 retry_needed = False
                 with _connections_lock:
-                    # Final race check under lock before registering
                     if _db_path_version != current_version:
                         conn.close()
                         retry_count += 1
@@ -116,11 +133,14 @@ def get_db_connection():
                 return None
         
         if retry_count >= max_retries:
-            logger.error(f"Exceeded max retries ({max_retries}) to obtain database connection due to path changes.")
+            logger.error(f"Exceeded max retries ({max_retries}) to obtain database connection.")
             return None
     return thread_local.connection
 
 def close_db_connection():
+    """
+    Closes the connection for the current thread and removes it from the shared tracker.
+    """
     if hasattr(thread_local, 'connection') and thread_local.connection is not None:
         try:
             conn = thread_local.connection
@@ -135,12 +155,13 @@ def close_db_connection():
 
 def _migrate_legacy_data(conn):
     """
-    Migrates data from legacy table names to the new prefixed tables.
+    Orchestrates the migration of data from legacy tables to the new prefixed schema.
+    
+    Args:
+        conn (sqlite3.Connection): The database connection to use for the migration.
     """
     cursor = conn.cursor()
     
-    # Mapping of (legacy_table, new_table, columns)
-    # Note: These identifiers are hardcoded compile-time constants.
     migrations = [
         ('bulletins', 'mesh_bulletins', 'board, sender_short_name, date, subject, content, unique_id'),
         ('mail', 'mesh_mail', 'sender, sender_short_name, recipient, date, subject, content, unique_id'),
@@ -153,23 +174,16 @@ def _migrate_legacy_data(conn):
     try:
         migrated_any = False
         for old_table, new_table, cols in migrations:
-            # Check if old table exists using a parameterized query
             cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (old_table,))
             if cursor.fetchone():
                 logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
                 
-                # Note: Table and column names are compile-time constants from the migrations list.
-                # SQLite does not support parameterized identifiers, so this pattern is intentional.
-                
-                # Deduplication strategy:
-                # 1. Mesh tables (mesh_bulletins, mesh_mail) have a UNIQUE(unique_id) constraint.
-                # 2. Ham tables (ham_messages, ham_groups, ham_urgent) and channels do not.
-                # We use INSERT OR IGNORE for mesh tables and a WHERE NOT EXISTS approach for the others.
+                # Mesh tables have strict unique_id constraints, so we use INSERT OR IGNORE 
+                # to handle duplicates across sync merges. Ham tables don't have unique IDs 
+                # so we manually deduplicate on content to prevent sync loops.
                 if new_table in ('mesh_bulletins', 'mesh_mail'):
                     cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
                 else:
-                    # For ham tables and channels, avoid re-inserting rows that already exist in the destination.
-                    # We match on all migrated columns to ensure rows are truly identical.
                     col_list = [c.strip() for c in cols.split(',')]
                     where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
                     cursor.execute(f"""
@@ -181,8 +195,9 @@ def _migrate_legacy_data(conn):
                         )
                     """)
                 
-                # Rename old table to prevent repeated migrations
-                # Preemptively drop legacy table if it exists to ensure deterministic behavior
+                # We rename the old table to 'legacy_...' instead of dropping it to provide 
+                # a manual recovery path if the automated migration logic fails to capture 
+                # specific edge-case data.
                 cursor.execute(f"DROP TABLE IF EXISTS legacy_{old_table}")
                 cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
                 logger.info(f"Successfully migrated {old_table}.")
@@ -198,13 +213,19 @@ def _migrate_legacy_data(conn):
         raise
 
 def initialize_database():
+    """
+    Initializes the database schema and performs data migrations.
+    Creates all required tables and indexes if they do not exist.
+
+    Returns:
+        bool: True if initialization and migration were successful, False otherwise.
+    """
     conn = get_db_connection()
     if conn is None:
         return False
     
     try:
         c = conn.cursor()
-        # Meshtastic tables (mesh_ prefix)
         c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         board TEXT NOT NULL,
@@ -230,11 +251,9 @@ def initialize_database():
                         url TEXT NOT NULL
                     )''')
         
-        # Create indexes for hot filter columns
         c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_bulletins_board ON mesh_bulletins(board)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_mail_recipient ON mesh_mail(recipient)')
         
-        # JS8Call tables (ham_ prefix)
         c.execute('''CREATE TABLE IF NOT EXISTS ham_messages (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         sender TEXT,
@@ -257,10 +276,8 @@ def initialize_database():
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )''')
         
-        # Commit table creation before starting migration transaction
         conn.commit()
         
-        # Migrations are self-committing or rolling back
         _migrate_legacy_data(conn)
         
         logger.info("Database schema initialized with mesh_ and ham_ prefixes.")

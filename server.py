@@ -55,7 +55,15 @@ logger = logging.getLogger(__name__)
 
 
 class BBSApp:
+    """
+    Main application controller for the TC²-BBS. 
+    Manages hardware lifecycle, monitoring, and integration threads.
+    """
+
     def __init__(self):
+        """
+        Initializes the application state and synchronization primitives.
+        """
         self.config = None
         self.args = None
         self.driver = None
@@ -73,6 +81,9 @@ class BBSApp:
         self.running = True
 
     def _display_banner(self):
+        """
+        Prints the application splash screen to stdout.
+        """
         banner = """
 ████████╗ ██████╗██████╗       ██████╗ ██████╗ ███████╗
 ╚══██╔══╝██╔════╝╚════██╗      ██╔══██╗██╔══██╗██╔════╝
@@ -85,6 +96,9 @@ Multi-Mode BBS Engine
         print(banner)
 
     def _setup_config(self):
+        """
+        Orchestrates configuration loading and system-wide initialization.
+        """
         self.args = init_cli_parser()
         config_file = self.args.config if self.args.config else "config.ini"
         self.config = initialize_config(config_file)
@@ -99,7 +113,6 @@ Multi-Mode BBS Engine
         # Monitor Settings
         self.watchdog_timeout = self._get_env_int("BBS_WATCHDOG_TIMEOUT", 300)
         
-        # Priority: Env > Config > Default
         parsed_keepalive = self._get_env_int("BBS_KEEPALIVE_INTERVAL", None)
         if parsed_keepalive is not None:
             self.keepalive_interval = parsed_keepalive
@@ -108,6 +121,7 @@ Multi-Mode BBS Engine
 
         self.heartbeat_interval = self.config.get('heartbeat_interval', 10)
 
+        # Low power mode overrides intervals to minimize radio traffic and local CPU cycles.
         if self.config.get('low_power'):
             self.heartbeat_interval = 120
             self.keepalive_interval = max(self.keepalive_interval, 300)
@@ -125,6 +139,16 @@ Multi-Mode BBS Engine
         )
 
     def _get_env_int(self, key, default):
+        """
+        Safely retrieves and parses an integer from the environment.
+
+        Args:
+            key (str): The environment variable name.
+            default (int): Fallback value if parsing fails or result is non-positive.
+
+        Returns:
+            int: The parsed value or the default.
+        """
         try:
             val = int(os.environ.get(key, default))
             return val if val > 0 else default
@@ -132,7 +156,14 @@ Multi-Mode BBS Engine
             return default
 
     def _write_heartbeat(self, status, reader_alive=True):
-        """Atomically writes heartbeat metrics."""
+        """
+        Atomically writes extended health metrics to the heartbeat file.
+        Uses a temp-and-move strategy to ensure external monitors never see partial writes.
+
+        Args:
+            status (str): Current application status (e.g., 'CONNECTED').
+            reader_alive (bool): Whether the underlying radio reader is functional.
+        """
         now = time.time()
         with self.last_rx_lock:
             last_rx = self.last_rx_time
@@ -152,19 +183,30 @@ Multi-Mode BBS Engine
             logger.debug(f"Heartbeat write failed: {e}")
 
     def _handle_packet(self, packet):
-        """Subscriber callback for incoming packets."""
+        """
+        Subscriber callback for incoming mesh packets. Updates timers and routes data.
+
+        Args:
+            packet (dict): The incoming Meshtastic packet.
+        """
         with self.last_rx_lock:
             self.last_rx_time = time.time()
         on_receive(packet, self.driver)
 
     def _run_monitoring_cycle(self, raw_interface):
-        """Inner loop for a single connection session."""
+        """
+        The main health monitoring loop for an active radio session.
+        Implements a multi-layered watchdog (Hardware, Protocol, and Data levels).
+
+        Args:
+            raw_interface: The underlying library-level radio interface.
+        """
         last_keepalive_sent = 0
 
         while self.running:
             now = time.time()
 
-            # 1. Hardware-level Watchdog (TCP Sockets)
+            # Layer 1: Hardware-level check for TCP disconnects.
             if (
                 self.config["interface_type"] == "tcp"
                 and hasattr(raw_interface, "socket")
@@ -176,7 +218,7 @@ Multi-Mode BBS Engine
                     logger.warning("TCP socket disconnected.")
                     break
 
-            # 2. Protocol-level Watchdog (Connectivity)
+            # Layer 2: Protocol-level check for interface responsiveness.
             is_conn = True
             if hasattr(raw_interface, "isConnected"):
                 conn_status = raw_interface.isConnected
@@ -190,7 +232,7 @@ Multi-Mode BBS Engine
                 logger.error("Radio interface disconnected.")
                 break
 
-            # 3. Data-level Watchdog (Silence Timeout)
+            # Layer 3: Data-level check for prolonged mesh silence.
             with self.last_rx_lock:
                 rx_delta = now - self.last_rx_time
 
@@ -200,7 +242,8 @@ Multi-Mode BBS Engine
                 )
                 break
 
-            # 4. Keepalive Logic
+            # Send periodic probes to verify the radio is still accepting commands 
+            # and to keep NAT/WiFi sessions active during quiet periods.
             if (
                 rx_delta > self.keepalive_interval
                 and (now - last_keepalive_sent) > self.keepalive_interval
@@ -217,12 +260,14 @@ Multi-Mode BBS Engine
                 except Exception as e:
                     logger.debug(f"Keepalive failed: {e}")
 
-            # 5. Heartbeat
             self._write_heartbeat("CONNECTED", reader_alive=is_conn)
             time.sleep(self.heartbeat_interval)
 
     def _session_cleanup(self):
-        """Cleanup after a single radio session."""
+        """
+        Performs localized cleanup after a radio session terminates, 
+        ensuring drivers and executors are safely released before a restart attempt.
+        """
         try:
             pub.unsubAll(self.config["mqtt_topic"])
         except (TopicNameError, Exception) as e:
@@ -240,7 +285,9 @@ Multi-Mode BBS Engine
         self._write_heartbeat("DISCONNECTED", reader_alive=False)
 
     def shutdown(self):
-        """Final application-level shutdown."""
+        """
+        Final application-level shutdown, releasing all global resources.
+        """
         logger.info("BBS Application shutting down...")
         self.running = False
         shutdown_executor(wait=True)
@@ -256,6 +303,10 @@ Multi-Mode BBS Engine
                 pass
 
     def run(self):
+        """
+        The primary execution entry point. Implements the high-level retry loop 
+        that keeps the BBS alive across transient hardware failures.
+        """
         self._display_banner()
         self._setup_config()
 
@@ -264,7 +315,6 @@ Multi-Mode BBS Engine
                 try:
                     init_executor()
 
-                    # 1. Initialize Hardware Interface
                     raw_interface = get_interface(self.config)
                     self.driver = MeshtasticDriver(
                         raw_interface,
@@ -272,10 +322,10 @@ Multi-Mode BBS Engine
                         allowed_nodes=self.config["allowed_nodes"]
                     )
 
-                    # 2. Setup Subscriptions
                     pub.subscribe(self._handle_packet, self.config["mqtt_topic"])
 
-                    # 3. Setup JS8Call Integration
+                    # JS8Call integration runs in a dedicated thread to prevent blocking 
+                    # the main Meshtastic reader loop during slow database queries.
                     if not self.js8call_client:
                         self.js8call_client = JS8CallClient(self.driver)
                         self.js8call_client.logger = js8call_logger
@@ -296,7 +346,6 @@ Multi-Mode BBS Engine
                                 )
                                 self.js8_thread.start()
 
-                    # 4. Reset Timers & Start Monitoring
                     with self.last_rx_lock:
                         self.last_rx_time = time.time()
 

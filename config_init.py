@@ -13,10 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 def init_cli_parser() -> argparse.Namespace:
-    """Function build the CLI parser and parses the arguments.
+    """
+    Initializes the command-line interface parser and processes arguments.
 
     Returns:
-        argparse.ArgumentParser: Argparse namespace with processed CLI args
+        argparse.Namespace: Object containing the parsed CLI arguments.
     """
     parser = argparse.ArgumentParser(description="Meshtastic BBS system")
 
@@ -70,17 +71,16 @@ def init_cli_parser() -> argparse.Namespace:
 def merge_config(
     system_config: dict[str, Any], args: argparse.Namespace
 ) -> dict[str, Any]:
-    """Function merges configuration read from the config file and provided on the CLI.
-
-    CLI arguments override values defined in the config file.
-    system_config argument is mutated by the function.
+    """
+    Merges CLI arguments into the existing system configuration dictionary.
+    CLI arguments take precedence over config file values.
 
     Args:
-        system_config (dict[str, Any]): System config dict returned by initialize_config()
-        args (argparse.Namespace): argparse namespace with parsed CLI args
+        system_config (dict): The configuration dictionary to be updated.
+        args (argparse.Namespace): The parsed command-line arguments.
 
     Returns:
-        dict[str, Any]: system config dict with merged configurations
+        dict: The updated system configuration dictionary.
     """
 
     if args.interface_type is not None:
@@ -103,20 +103,15 @@ def merge_config(
 
 def initialize_config(config_file: str = None) -> dict[str, Any]:
     """
-    Function reads and parses system configuration file
-
-    Returns a dict with the following entries:
-    config - parsed config file
-    interface_type - type of the active interface
-    hostname - host name for TCP interface
-    port - serial port name for serial interface
-    bbs_nodes - list of peer nodes to sync with
+    Loads and parses the system configuration file.
 
     Args:
-        config_file (str, optional): Path to config file. Function reads from './config.ini' if this arg is set to None. Defaults to None.
+        config_file (str, optional): Path to the .ini config file. 
+            Defaults to 'config.ini' if not provided.
 
     Returns:
-        dict: dict with system configuration, ad described above
+        dict: A flat dictionary containing key application settings including 
+            interface details, sync nodes, and healthcheck parameters.
     """
     config = configparser.ConfigParser()
 
@@ -140,7 +135,6 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
 
     print(f"Nodes with Urgent board permissions: {allowed_nodes}")
 
-    # Healthcheck settings
     heartbeat_interval = config.getint("healthcheck", "heartbeat_interval", fallback=10)
     low_power = config.getboolean("healthcheck", "low_power", fallback=False)
 
@@ -161,31 +155,22 @@ def get_interface(
     system_config: dict[str, Any],
 ) -> meshtastic.stream_interface.StreamInterface:
     """
-    Function opens and returns an instance meshtastic interface of type specified by the configuration
-
-    Function creates and returns an instance of a class inheriting from meshtastic.stream_interface.StreamInterface.
-    The type of the class depends on the type of the interface specified by the system configuration.
-    For 'serial' interfaces, function returns an instance of meshtastic.serial_interface.SerialInterface,
-    and for 'tcp' interface, an instance of meshtastic.tcp_interface.TCPInterface.
+    Instantiates and configures the appropriate Meshtastic hardware interface.
 
     Args:
-        system_config (dict[str, Any]): A dict with system configuration. See description of initialize_config() for details.
-
-    Raises:
-        ValueError: Exception raised in the following cases:
-                - Type of interface not provided in the system config
-                - Multiple serial ports present in the system, and no port specified in the configuration
-                - Serial port interface requested, but no ports found in the system
-                - Hostname not provided for TCP interface
-        Exception: Any other error from the meshtastic library (ConnectionRefused, PermissionError etc)
+        system_config (dict): Configuration containing interface type and parameters.
 
     Returns:
-        meshtastic.stream_interface.StreamInterface: An instance of StreamInterface
+        meshtastic.stream_interface.StreamInterface: An active radio interface.
+
+    Raises:
+        ValueError: If configuration is incomplete or ambiguous (e.g., multiple ports).
     """
     if system_config["interface_type"] == "serial":
         if system_config["port"]:
             return meshtastic.serial_interface.SerialInterface(system_config["port"])
         else:
+            # Auto-detect ports if only one is available to simplify setup for single-radio nodes.
             ports = list(serial.tools.list_ports.comports())
             if len(ports) == 1:
                 return meshtastic.serial_interface.SerialInterface(ports[0].device)
@@ -203,19 +188,16 @@ def get_interface(
             hostname=system_config["hostname"]
         )
 
-        # Configure TCP Keep-Alive to prevent WiFi/NAT timeouts
+        # TCP Keep-Alive is configured to prevent WiFi routers or NAT gateways 
+        # from silently dropping the connection during mesh inactivity.
         if hasattr(interface, "socket") and interface.socket:
             try:
                 sock = interface.socket
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                # Note: TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT are Linux-specific but likely available on Raspberry Pi (Linux)
-                # Send probes after 60 seconds of inactivity
                 if hasattr(socket, "TCP_KEEPIDLE"):
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
-                # Probe every 10 seconds
                 if hasattr(socket, "TCP_KEEPINTVL"):
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
-                # Close after 3 failed probes
                 if hasattr(socket, "TCP_KEEPCNT"):
                     sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
                 logger.info("TCP Keep-Alive enabled for Meshtastic interface.")

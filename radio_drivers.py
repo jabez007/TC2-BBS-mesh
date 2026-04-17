@@ -6,75 +6,121 @@ logger = logging.getLogger(__name__)
 
 class BaseRadioDriver(abc.ABC):
     """
-    Abstract base class for all radio interfaces (Meshtastic, Mesh Core, etc.)
+    Abstract base class defining the required interface for all radio hardware 
+    drivers (e.g., Meshtastic, Mesh Core).
     """
 
     @abc.abstractmethod
     def send_text(self, text, destination_id, want_ack=True):
+        """
+        Sends a text message to a specific destination.
+
+        Args:
+            text (str): The message content.
+            destination_id (str): The destination node's ID.
+            want_ack (bool): Whether to request a delivery acknowledgment.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def get_nodes(self):
-        """Returns a dictionary of nodes keyed by node_id"""
+        """
+        Retrieves the list of all known nodes in the mesh.
+
+        Returns:
+            dict: Node data keyed by node_id.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def get_node_by_num(self, node_num):
-        """Returns a node object based on its numeric ID"""
+        """
+        Finds a node's data based on its numeric identifier.
+
+        Args:
+            node_num (int): The numeric ID of the node.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def get_my_node_id(self):
-        """Returns the ID of the local radio node"""
+        """
+        Retrieves the unique string ID of the local node.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def get_my_node_num(self):
-        """Returns the numeric ID of the local radio node"""
+        """
+        Retrieves the numeric ID of the local node.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def get_short_name(self, node_id):
-        """Returns the short name of a node"""
+        """
+        Retrieves the short name (alias) of a given node.
+
+        Args:
+            node_id (str): The unique string ID of the node.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def close(self):
-        """Closes the radio interface"""
+        """
+        Gracefully shuts down the radio hardware interface.
+        """
         raise NotImplementedError
 
     @abc.abstractmethod
     def getNode(self, node_id):
-        """Returns node info for keepalive"""
+        """
+        Retrieves a node object for direct interaction (e.g., keepalives).
+
+        Args:
+            node_id (str): The unique string ID of the node.
+        """
         raise NotImplementedError
 
 
 class MeshtasticDriver(BaseRadioDriver):
     """
-    Adapter for the Meshtastic Python library
+    Adapter for the Meshtastic Python library, mapping the standard BBS driver 
+    interface to Meshtastic-specific method calls.
     """
 
     def __init__(self, interface, bbs_nodes=None, allowed_nodes=None):
+        """
+        Initializes the driver with an active Meshtastic interface.
+
+        Args:
+            interface: An initialized meshtastic.stream_interface.StreamInterface.
+            bbs_nodes (list, optional): Known peer BBS nodes for sync logic.
+            allowed_nodes (list, optional): Nodes with administrative permissions.
+        """
         self.interface = interface
         self._bbs_nodes = bbs_nodes if bbs_nodes is not None else []
         self._allowed_nodes = allowed_nodes if allowed_nodes is not None else []
 
     @property
     def bbs_nodes(self):
+        """Immutable list of peer BBS nodes for this session."""
         return self._bbs_nodes
 
     @property
     def allowed_nodes(self):
+        """Immutable list of authorized administrator nodes for this session."""
         return self._allowed_nodes
 
     @property
     def myInfo(self):
-        # Compatibility for server.py watchdog
+        # Maintained for backward compatibility with the legacy server watchdog logic.
         return self.interface.myInfo
 
     @property
     def nodes(self):
-        # Compatibility for existing code accessing .nodes directly
+        # Maintained for legacy code that performs direct dictionary access on node lists.
         return self.interface.nodes
 
     def send_text(self, text, destination_id, want_ack=True):
@@ -107,7 +153,6 @@ class MeshtasticDriver(BaseRadioDriver):
         return None
 
     def getNode(self, node_id):
-        # Compatibility for keepalive
         return self.interface.getNode(node_id)
 
     def close(self):
@@ -116,10 +161,15 @@ class MeshtasticDriver(BaseRadioDriver):
 
 class MeshCoreStubDriver(BaseRadioDriver):
     """
-    Stub for the future Mesh Core integration
+    Placeholder driver for future Mesh Core integration. Provides a safe 
+    no-op environment for development without active radio hardware.
     """
 
     def __init__(self, config):
+        """
+        Args:
+            config: The system configuration dictionary.
+        """
         self.config = config
         logger.info("Mesh Core Driver Stub initialized (Hardware not yet connected)")
 
