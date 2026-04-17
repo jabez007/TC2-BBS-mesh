@@ -47,9 +47,28 @@ def send_message(message, destination, driver):
 
 
 def get_node_info(driver, short_name):
-    nodes = [{'num': node_id, 'shortName': node['user']['shortName'], 'longName': node['user']['longName']}
-             for node_id, node in driver.get_nodes().items()
-             if node['user']['shortName'].lower() == short_name]
+    """
+    Finds and returns detailed information for a node given its short name.
+    
+    Args:
+        driver (BaseRadioDriver): The active radio driver.
+        short_name (str): The short name of the node to search for.
+
+    Returns:
+        list: A list of dictionaries containing node 'num', 'shortName', and 'longName'.
+    """
+    nodes = []
+    for node_id, node in driver.get_nodes().items():
+        user = node.get('user', {})
+        s_name = user.get('shortName', '')
+        l_name = user.get('longName', '')
+        
+        if s_name.lower() == short_name.lower():
+            nodes.append({
+                'num': node.get('num', node_id),
+                'shortName': s_name,
+                'longName': l_name
+            })
     return nodes
 
 

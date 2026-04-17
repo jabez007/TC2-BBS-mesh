@@ -34,10 +34,14 @@ def add_channel(name, url, bbs_nodes=None, driver=None):
         return False
     
     c = conn.cursor()
-    c.execute("INSERT INTO mesh_channels (name, url) VALUES (?, ?)", (name, url))
+    c.execute("INSERT OR IGNORE INTO mesh_channels (name, url) VALUES (?, ?)", (name, url))
+    
+    # rowcount > 0 ensures we only trigger sync if this is a fresh entry, 
+    # preventing loops and redundant bandwidth usage during mesh syncs.
+    is_new = c.rowcount > 0
     conn.commit()
 
-    if bbs_nodes and driver:
+    if is_new and bbs_nodes and driver:
         send_channel_to_bbs_nodes(name, url, bbs_nodes, driver)
     return True
 
@@ -212,8 +216,13 @@ def add_mail(sender_id, sender_short_name, recipient_id, subject, content, bbs_n
         unique_id = str(uuid.uuid4())
     c.execute("INSERT OR IGNORE INTO mesh_mail (sender, sender_short_name, recipient, date, subject, content, unique_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
               (sender_id, sender_short_name, recipient_id, date, subject, content, unique_id))
+    
+    # Only propagate via sync if this is a fresh entry. This prevents 
+    # redundant sync loops and bandwidth exhaustion in a multi-node mesh.
+    is_new = c.rowcount > 0
     conn.commit()
-    if bbs_nodes and driver:
+    
+    if is_new and bbs_nodes and driver:
         send_mail_to_bbs_nodes(sender_id, sender_short_name, recipient_id, subject, content, unique_id, bbs_nodes, driver)
     return unique_id
 
