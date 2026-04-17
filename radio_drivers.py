@@ -54,16 +54,18 @@ class MeshtasticDriver(BaseRadioDriver):
     Adapter for the Meshtastic Python library
     """
 
-    def __init__(self, interface):
+    def __init__(self, interface, bbs_nodes=None, allowed_nodes=None):
         self.interface = interface
+        self._bbs_nodes = bbs_nodes if bbs_nodes is not None else []
+        self._allowed_nodes = allowed_nodes if allowed_nodes is not None else []
 
     @property
     def bbs_nodes(self):
-        return getattr(self.interface, "bbs_nodes", [])
+        return self._bbs_nodes
 
     @property
     def allowed_nodes(self):
-        return getattr(self.interface, "allowed_nodes", [])
+        return self._allowed_nodes
 
     @property
     def myInfo(self):
@@ -100,7 +102,7 @@ class MeshtasticDriver(BaseRadioDriver):
 
     def get_short_name(self, node_id):
         node_info = self.interface.nodes.get(node_id)
-        if node_info:
+        if node_info and node_info.get("user"):
             return node_info["user"].get("shortName")
         return None
 

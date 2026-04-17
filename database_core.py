@@ -182,6 +182,8 @@ def _migrate_legacy_data(conn):
                     """)
                 
                 # Rename old table to prevent repeated migrations
+                # Preemptively drop legacy table if it exists to ensure deterministic behavior
+                cursor.execute(f"DROP TABLE IF EXISTS legacy_{old_table}")
                 cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
                 logger.info(f"Successfully migrated {old_table}.")
                 migrated_any = True

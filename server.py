@@ -100,9 +100,9 @@ Multi-Mode BBS Engine
         self.watchdog_timeout = self._get_env_int("BBS_WATCHDOG_TIMEOUT", 300)
         
         # Priority: Env > Config > Default
-        env_keepalive = os.environ.get('BBS_KEEPALIVE_INTERVAL')
-        if env_keepalive:
-            self.keepalive_interval = self._get_env_int("BBS_KEEPALIVE_INTERVAL", 120)
+        parsed_keepalive = self._get_env_int("BBS_KEEPALIVE_INTERVAL", None)
+        if parsed_keepalive is not None:
+            self.keepalive_interval = parsed_keepalive
         else:
             self.keepalive_interval = self.config.get('keepalive_interval', 120)
 
@@ -266,9 +266,11 @@ Multi-Mode BBS Engine
 
                     # 1. Initialize Hardware Interface
                     raw_interface = get_interface(self.config)
-                    self.driver = MeshtasticDriver(raw_interface)
-                    self.driver.bbs_nodes = self.config["bbs_nodes"]
-                    self.driver.allowed_nodes = self.config["allowed_nodes"]
+                    self.driver = MeshtasticDriver(
+                        raw_interface,
+                        bbs_nodes=self.config["bbs_nodes"],
+                        allowed_nodes=self.config["allowed_nodes"]
+                    )
 
                     # 2. Setup Subscriptions
                     pub.subscribe(self._handle_packet, self.config["mqtt_topic"])

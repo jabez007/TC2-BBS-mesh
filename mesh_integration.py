@@ -55,12 +55,14 @@ def add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver, 
     c.execute(
         "INSERT OR IGNORE INTO mesh_bulletins (board, sender_short_name, date, subject, content, unique_id) VALUES (?, ?, ?, ?, ?, ?)",
         (board, sender_short_name, date, subject, content, unique_id))
+    is_new = c.rowcount > 0
     conn.commit()
-    if bbs_nodes and driver:
+
+    if is_new and bbs_nodes and driver:
         send_bulletin_to_bbs_nodes(board, sender_short_name, subject, content, unique_id, bbs_nodes, driver)
 
     # New logic to send group chat notification for urgent bulletins
-    if board.lower() == "urgent":
+    if is_new and board.lower() == "urgent":
         notification_message = f"💥NEW URGENT BULLETIN💥\nFrom: {sender_short_name}\nTitle: {subject}\nDM 'CB,,Urgent' to view"
         send_message(notification_message, BROADCAST_NUM, driver)
 
