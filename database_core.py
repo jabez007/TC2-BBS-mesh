@@ -91,6 +91,11 @@ def get_db_connection():
                 thread_local.connection.close()
             except sqlite3.Error as e:
                 logger.debug(f"Error closing stale connection: {e}")
+            
+            # Ensure the stale connection is removed from tracking to avoid later 
+            # attempts to close an already-closed socket.
+            with _connections_lock:
+                _connections.pop(threading.get_ident(), None)
             thread_local.connection = None
 
     if not hasattr(thread_local, 'connection') or thread_local.connection is None:
@@ -186,6 +191,8 @@ def _migrate_legacy_data(conn):
                 else:
                     col_list = [c.strip() for c in cols.split(',')]
                     where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
+                    # We GROUP BY all columns from the source to ensure that if the legacy 
+                    # table contains duplicates, only a single unique row is considered for migration.
                     cursor.execute(f"""
                         INSERT INTO {new_table} ({cols}) 
                         SELECT {cols} FROM {old_table} o 
@@ -193,6 +200,7 @@ def _migrate_legacy_data(conn):
                             SELECT 1 FROM {new_table} n 
                             WHERE {where_clause}
                         )
+                        GROUP BY {cols}
                     """)
                 
                 # We rename the old table to 'legacy_...' instead of dropping it to provide 

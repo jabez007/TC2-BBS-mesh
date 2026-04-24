@@ -106,7 +106,7 @@ def add_bulletin(board, sender_short_name, subject, content, bbs_nodes, driver, 
 
     # We broadcast urgent notifications only once per new bulletin to ensure 
     # mesh-wide visibility without flooding the channel with repeat alerts.
-    if is_new and board.lower() == "urgent":
+    if is_new and driver and board.lower() == "urgent":
         notification_message = f"💥NEW URGENT BULLETIN💥\nFrom: {sender_short_name}\nTitle: {subject}\nDM 'CB,,Urgent' to view"
         send_message(notification_message, BROADCAST_NUM, driver)
 
@@ -182,7 +182,8 @@ def delete_bulletin(bulletin_id, bbs_nodes, driver):
         stable_id = result[0]
         c.execute("DELETE FROM mesh_bulletins WHERE unique_id = ?", (stable_id,))
         conn.commit()
-        send_delete_bulletin_to_bbs_nodes(stable_id, bbs_nodes, driver)
+        if bbs_nodes and driver:
+            send_delete_bulletin_to_bbs_nodes(stable_id, bbs_nodes, driver)
         return True
     else:
         logger.warning(f"Attempted to delete non-existent bulletin: {bulletin_id}")
@@ -299,11 +300,12 @@ def delete_mail(unique_id, recipient_id, bbs_nodes, driver):
 
         c.execute("DELETE FROM mesh_mail WHERE unique_id = ? and recipient = ?", (unique_id, recipient_id,))
         conn.commit()
-        send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, driver)
+        if bbs_nodes and driver:
+            send_delete_mail_to_bbs_nodes(unique_id, bbs_nodes, driver)
         return True
     except Exception:
         logger.exception(f"Error deleting mail with unique_id {unique_id}")
-        raise
+        return False
 
 
 def get_sender_id_by_mail_id(mail_id):

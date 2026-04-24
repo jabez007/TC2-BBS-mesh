@@ -16,8 +16,6 @@ def update_user_state(user_id, state):
 def get_user_state(user_id):
     with user_states_lock:
         return user_states.get(user_id, None)
-
-
 def send_message(message, destination, driver):
     max_payload_size = 200
     for i in range(0, len(message), max_payload_size):
@@ -28,9 +26,6 @@ def send_message(message, destination, driver):
                 destination_id=destination,
                 want_ack=True
             )
-            destid = get_node_id_from_num(destination, driver)
-            chunk = chunk.replace('\n', '\\n')
-            logger.info(f"Sending message to user '{get_node_short_name(destid, driver)}' ({destid}) with sendID {getattr(d, 'id', 'N/A')}: \"{chunk}\"")
         except OSError:
             logger.exception("CONNECTION ERROR during send. Closing driver to trigger reconnect.")
             try:
@@ -41,17 +36,29 @@ def send_message(message, destination, driver):
         except Exception:
             logger.exception("REPLY SEND ERROR")
             return False # Return False on any other send error
-        
+
+        # Logging is handled separately so that lookups of names/IDs don't 
+        # interfere with the reported success of the physical radio send.
+        try:
+            destid = get_node_id_from_num(destination, driver)
+            log_chunk = chunk.replace('\n', '\\n')
+            logger.info(f"Sending message to user '{get_node_short_name(destid, driver)}' ({destid}) with sendID {getattr(d, 'id', 'N/A')}: \"{log_chunk}\"")
+        except Exception:
+            logger.debug("Failed to log message send details", exc_info=True)
+
         time.sleep(2)
     return True
 
 
-def get_node_info(driver, short_name):
-    """
-    Finds and returns detailed information for a node given its short name.
-    
-    Args:
-        driver (BaseRadioDriver): The active radio driver.
+...
+
+
+def get_node_id_from_num(node_num, driver):
+    for node_id, node in driver.get_nodes().items():
+        # Safely access 'num' to handle malformed or incomplete node data.
+        if node.get('num') == node_num:
+            return node_id
+    return None
         short_name (str): The short name of the node to search for.
 
     Returns:
