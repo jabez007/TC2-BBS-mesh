@@ -219,6 +219,7 @@ def initialize_database():
     Initializes the database schema and performs data migrations.
     Creates all required tables and indexes if they do not exist.
     Uses an exclusive transaction to prevent race conditions during DDL and migration.
+    Guards against nested transaction errors by checking conn.in_transaction.
 
     Returns:
         bool: True if initialization and migration were successful, False otherwise.
@@ -227,10 +228,13 @@ def initialize_database():
     if conn is None:
         return False
     
+    # If a transaction is already active on this connection (e.g. from a caller), 
+    # we skip the 'BEGIN EXCLUSIVE' and rely on the existing transaction's atomicity.
+    manage_transaction = not conn.in_transaction
+    
     try:
-        # Wrap everything in an exclusive transaction to ensure DDL and migrations are atomic 
-        # and not interleaved with other concurrent initialization attempts.
-        conn.execute("BEGIN EXCLUSIVE")
+        if manage_transaction:
+            conn.execute("BEGIN EXCLUSIVE")
         
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
@@ -297,10 +301,13 @@ def initialize_database():
         # Migrations are processed within the same exclusive transaction.
         _migrate_legacy_data(conn)
         
-        conn.commit()
+        if manage_transaction:
+            conn.commit()
+            
         logger.info("Database schema initialized and migrated successfully.")
         return True
     except sqlite3.Error:
-        conn.rollback()
+        if manage_transaction:
+            conn.rollback()
         logger.exception("Failed to initialize database schema")
         return False
