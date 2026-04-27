@@ -29,13 +29,28 @@ def send_message(message, destination, driver):
     Sends a text message, splitting it into chunks if it exceeds the radio MTU.
     Handles connection errors and provides decoupled logging for reliability.
     """
+    # Normalize the destination to a stable node ID up-front to ensure 
+    # consistency across the radio call and logging.
+    try:
+        dest_id = get_node_id_from_num(destination, driver)
+        if not dest_id and isinstance(destination, str) and destination.startswith('!'):
+            # If it's already a node ID, use it.
+            dest_id = destination
+    except Exception:
+        logger.exception(f"Failed to resolve destination ID: {destination}")
+        return False
+        
+    if not dest_id:
+        logger.error(f"Could not resolve destination {destination} to a valid node ID")
+        return False
+
     max_payload_size = 200
     for i in range(0, len(message), max_payload_size):
         chunk = message[i:i + max_payload_size]
         try:
             d = driver.send_text(
                 text=chunk,
-                destination_id=destination,
+                destination_id=dest_id,
                 want_ack=True
             )
         except OSError:
@@ -49,12 +64,11 @@ def send_message(message, destination, driver):
             logger.exception("REPLY SEND ERROR")
             return False
 
-        # Logging is handled separately so that lookups of names/IDs don't 
+        # Logging is handled separately so that lookups of names don't 
         # interfere with the reported success of the physical radio send.
         try:
-            destid = get_node_id_from_num(destination, driver)
             log_chunk = chunk.replace('\n', '\\n')
-            logger.info(f"Sending message to user '{get_node_short_name(destid, driver)}' ({destid}) with sendID {getattr(d, 'id', 'N/A')}: \"{log_chunk}\"")
+            logger.info(f"Sending message to user '{get_node_short_name(dest_id, driver)}' ({dest_id}) with sendID {getattr(d, 'id', 'N/A')}: \"{log_chunk}\"")
         except Exception:
             logger.debug("Failed to log message send details", exc_info=True)
 
@@ -65,6 +79,7 @@ def send_message(message, destination, driver):
 def get_node_info(driver, short_name):
     """
     Finds and returns detailed information for a node given its short name.
+    Malformed nodes or nodes without a valid numeric ID are returned with num: None.
     
     Args:
         driver (BaseRadioDriver): The active radio driver.
@@ -80,8 +95,15 @@ def get_node_info(driver, short_name):
         l_name = user.get('longName', '')
         
         if s_name.lower() == short_name.lower():
+            # Ensure 'num' is a consistent numeric type for callers.
+            try:
+                raw_num = node.get('num')
+                node_num = int(raw_num) if raw_num is not None else None
+            except (ValueError, TypeError):
+                node_num = None
+                
             nodes.append({
-                'num': node.get('num', node_id),
+                'num': node_num,
                 'shortName': s_name,
                 'longName': l_name
             })
@@ -92,6 +114,9 @@ def get_node_id_from_num(node_num, driver):
     """
     Resolves a numeric node ID to its string unique identifier.
     """
+    if isinstance(node_num, str) and node_num.startswith('!'):
+        return node_num # Already a node ID
+        
     for node_id, node in driver.get_nodes().items():
         # Safely access 'num' to handle malformed or incomplete node data.
         if node.get('num') == node_num:

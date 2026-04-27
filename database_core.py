@@ -161,6 +161,7 @@ def close_db_connection():
 def _migrate_legacy_data(conn):
     """
     Orchestrates the migration of data from legacy tables to the new prefixed schema.
+    Relies on the caller to manage the transaction.
     
     Args:
         conn (sqlite3.Connection): The database connection to use for the migration.
@@ -176,54 +177,48 @@ def _migrate_legacy_data(conn):
         ('urgent', 'ham_urgent', 'sender, groupname, message, timestamp')
     ]
     
-    try:
-        migrated_any = False
-        for old_table, new_table, cols in migrations:
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (old_table,))
-            if cursor.fetchone():
-                logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
-                
-                # Tables with strict UNIQUE constraints use INSERT OR IGNORE to handle 
-                # duplicates across sync merges. Ham tables don't have unique IDs 
-                # so we manually deduplicate on content to prevent sync loops.
-                if new_table in ('mesh_bulletins', 'mesh_mail', 'mesh_channels'):
-                    cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
-                else:
-                    col_list = [c.strip() for c in cols.split(',')]
-                    where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
-                    # We GROUP BY all columns from the source to ensure that if the legacy 
-                    # table contains duplicates, only a single unique row is considered for migration.
-                    cursor.execute(f"""
-                        INSERT INTO {new_table} ({cols}) 
-                        SELECT {cols} FROM {old_table} o 
-                        WHERE NOT EXISTS (
-                            SELECT 1 FROM {new_table} n 
-                            WHERE {where_clause}
-                        )
-                        GROUP BY {cols}
-                    """)
-                
-                # We rename the old table to 'legacy_...' instead of dropping it to provide 
-                # a manual recovery path if the automated migration logic fails to capture 
-                # specific edge-case data.
-                cursor.execute(f"DROP TABLE IF EXISTS legacy_{old_table}")
-                cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
-                logger.info(f"Successfully migrated {old_table}.")
-                migrated_any = True
-        
-        if migrated_any:
-            conn.commit()
-            logger.info("Database migration completed successfully.")
+    migrated_any = False
+    for old_table, new_table, cols in migrations:
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (old_table,))
+        if cursor.fetchone():
+            logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
             
-    except sqlite3.Error:
-        conn.rollback()
-        logger.exception("Database migration failed. Rolled back changes.")
-        raise
+            # Tables with strict UNIQUE constraints use INSERT OR IGNORE to handle 
+            # duplicates across sync merges. Ham tables don't have unique IDs 
+            # so we manually deduplicate on content to prevent sync loops.
+            if new_table in ('mesh_bulletins', 'mesh_mail', 'mesh_channels'):
+                cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
+            else:
+                col_list = [c.strip() for c in cols.split(',')]
+                where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
+                # We GROUP BY all columns from the source to ensure that if the legacy 
+                # table contains duplicates, only a single unique row is considered for migration.
+                cursor.execute(f"""
+                    INSERT INTO {new_table} ({cols}) 
+                    SELECT {cols} FROM {old_table} o 
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM {new_table} n 
+                        WHERE {where_clause}
+                    )
+                    GROUP BY {cols}
+                """)
+            
+            # We rename the old table to 'legacy_...' instead of dropping it to provide 
+            # a manual recovery path if the automated migration logic fails to capture 
+            # specific edge-case data.
+            cursor.execute(f"DROP TABLE IF EXISTS legacy_{old_table}")
+            cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
+            logger.info(f"Successfully migrated {old_table}.")
+            migrated_any = True
+    
+    if migrated_any:
+        logger.info("Database migration data processed.")
 
 def initialize_database():
     """
     Initializes the database schema and performs data migrations.
     Creates all required tables and indexes if they do not exist.
+    Uses an exclusive transaction to prevent race conditions during DDL and migration.
 
     Returns:
         bool: True if initialization and migration were successful, False otherwise.
@@ -233,6 +228,10 @@ def initialize_database():
         return False
     
     try:
+        # Wrap everything in an exclusive transaction to ensure DDL and migrations are atomic 
+        # and not interleaved with other concurrent initialization attempts.
+        conn.execute("BEGIN EXCLUSIVE")
+        
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -295,12 +294,13 @@ def initialize_database():
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )''')
         
-        conn.commit()
-        
+        # Migrations are processed within the same exclusive transaction.
         _migrate_legacy_data(conn)
         
-        logger.info("Database schema initialized with mesh_ and ham_ prefixes.")
+        conn.commit()
+        logger.info("Database schema initialized and migrated successfully.")
         return True
     except sqlite3.Error:
+        conn.rollback()
         logger.exception("Failed to initialize database schema")
         return False
