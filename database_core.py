@@ -263,16 +263,6 @@ def initialize_database():
                         UNIQUE(name, url)
                     )''')
         
-        # Deduplicate existing channels to safely apply the new constraint for older databases.
-        c.execute('''
-            DELETE FROM mesh_channels 
-            WHERE id NOT IN (
-                SELECT MIN(id) 
-                FROM mesh_channels 
-                GROUP BY name, url
-            )
-        ''')
-        
         c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_bulletins_board ON mesh_bulletins(board)')
         c.execute('CREATE INDEX IF NOT EXISTS idx_mesh_mail_recipient ON mesh_mail(recipient)')
         
