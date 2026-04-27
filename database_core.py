@@ -183,10 +183,10 @@ def _migrate_legacy_data(conn):
             if cursor.fetchone():
                 logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
                 
-                # Mesh tables have strict unique_id constraints, so we use INSERT OR IGNORE 
-                # to handle duplicates across sync merges. Ham tables don't have unique IDs 
+                # Tables with strict UNIQUE constraints use INSERT OR IGNORE to handle 
+                # duplicates across sync merges. Ham tables don't have unique IDs 
                 # so we manually deduplicate on content to prevent sync loops.
-                if new_table in ('mesh_bulletins', 'mesh_mail'):
+                if new_table in ('mesh_bulletins', 'mesh_mail', 'mesh_channels'):
                     cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
                 else:
                     col_list = [c.strip() for c in cols.split(',')]
