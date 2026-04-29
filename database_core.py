@@ -104,6 +104,7 @@ def get_db_connection():
         while retry_count < max_retries:
             current_version = _db_path_version
             db_path = get_db_path()
+            conn = None
             try:
                 conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
                 # WAL mode is essential for allowing simultaneous reads/writes in a shared BBS environment.
@@ -114,6 +115,7 @@ def get_db_connection():
                 # that was invalidated during the relatively slow connect() call.
                 if _db_path_version != current_version:
                     conn.close()
+                    conn = None
                     retry_count += 1
                     time.sleep(0.1)
                     continue
@@ -122,6 +124,7 @@ def get_db_connection():
                 with _connections_lock:
                     if _db_path_version != current_version:
                         conn.close()
+                        conn = None
                         retry_count += 1
                         retry_needed = True
                     else:
@@ -134,8 +137,20 @@ def get_db_connection():
                     continue
                 break
             except sqlite3.Error:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
                 logger.exception(f"Failed to connect to database at {db_path}")
                 return None
+            except Exception:
+                if conn:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                raise
         
         if retry_count >= max_retries:
             logger.error(f"Exceeded max retries ({max_retries}) to obtain database connection.")
@@ -235,6 +250,8 @@ def initialize_database():
     try:
         if manage_transaction:
             conn.execute("BEGIN EXCLUSIVE")
+        else:
+            conn.execute("SAVEPOINT sp_init")
         
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
@@ -293,11 +310,18 @@ def initialize_database():
         
         if manage_transaction:
             conn.commit()
+        else:
+            conn.execute("RELEASE SAVEPOINT sp_init")
             
         logger.info("Database schema initialized and migrated successfully.")
         return True
     except sqlite3.Error:
         if manage_transaction:
             conn.rollback()
+        else:
+            try:
+                conn.execute("ROLLBACK TO SAVEPOINT sp_init")
+            except sqlite3.Error:
+                logger.debug("Failed to rollback to savepoint during initialization", exc_info=True)
         logger.exception("Failed to initialize database schema")
         return False
