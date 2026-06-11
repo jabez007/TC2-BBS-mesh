@@ -5,6 +5,7 @@ import sys
 import time
 import configparser
 import tempfile
+from pathlib import Path
 
 
 import math
@@ -17,6 +18,9 @@ try:
         RX_TIMEOUT = 600
 except (ValueError, TypeError):
     RX_TIMEOUT = 600
+
+
+DEFAULT_DB_NAME = "bbs.db"
 
 
 def get_config():
@@ -38,6 +42,17 @@ def get_config():
         else:
             return config, path
     return None, None
+
+
+def get_app_root(config_path):
+    """Infer the application root used for relative database paths."""
+    if not config_path:
+        return Path.cwd()
+
+    config_file = Path(config_path).resolve()
+    if config_file.parent.name == "config":
+        return config_file.parent.parent
+    return config_file.parent
 
 
 def check_meshtastic_connection(host="localhost", port=4403):
@@ -75,26 +90,46 @@ def check_meshtastic_connection(host="localhost", port=4403):
             except OSError:
                 pass
 
-def check_files(config_path):
-    """Verify essential application files exist"""
-    # SQLite uses bbs.db in current working directory of server.py
-    # Look in CWD and config dir for bbs.db to match server resolution
-    db_paths = [
-        "bbs.db",
-        os.path.join(os.path.dirname(config_path), "bbs.db")
-    ]
-    
-    found_db = False
+def _expand_db_candidates(db_path, config_path):
+    """Return concrete filesystem candidates for an effective DB path."""
+    path = Path(db_path).expanduser()
+    if path.is_absolute():
+        return [str(path)]
+
+    app_root = get_app_root(config_path)
+    return [str((app_root / path).resolve())]
+
+
+def get_database_candidates(config, config_path):
+    """Resolve candidate database paths using the same precedence as the server."""
+    configured_db_path = None
+    if config is not None:
+        configured_db_path = config.get("database", "db_path", fallback=None)
+
+    if configured_db_path:
+        return _expand_db_candidates(configured_db_path, config_path), "[database] db_path"
+
+    env_db_path = os.environ.get("BBS_DB_PATH")
+    if env_db_path:
+        return _expand_db_candidates(env_db_path, config_path), "BBS_DB_PATH"
+
+    return _expand_db_candidates(DEFAULT_DB_NAME, config_path), f"default {DEFAULT_DB_NAME}"
+
+
+def check_files(config, config_path):
+    """Verify the effective database file exists and is readable."""
+    db_paths, db_source = get_database_candidates(config, config_path)
+
     for db_path in db_paths:
         if os.path.exists(db_path) and os.access(db_path, os.R_OK):
-            found_db = True
-            break
-            
-    if not found_db:
-        print("Essential file missing or not readable: bbs.db (looked in CWD and config dir)")
-        return False
-        
-    return True
+            return True
+
+    looked_in = ", ".join(db_paths)
+    print(
+        "Essential file missing or not readable: "
+        f"database from {db_source} (looked in: {looked_in})"
+    )
+    return False
 
 
 def check_process_health():
@@ -295,7 +330,7 @@ def main():
     print(f"Using configuration from: {config_path}")
 
     print("Running file health checks...")
-    if not check_files(config_path):
+    if not check_files(config, config_path):
         print("File health checks failed")
         sys.exit(1)
 
