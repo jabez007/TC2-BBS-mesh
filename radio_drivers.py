@@ -1,12 +1,18 @@
-import logging
 import abc
+import logging
+import threading
+from contextlib import contextmanager
 
 logger = logging.getLogger(__name__)
 
 
+class DriverClosedError(RuntimeError):
+    """Raised when a caller tries to use a driver that is closing or closed."""
+
+
 class BaseRadioDriver(abc.ABC):
     """
-    Abstract base class defining the required interface for all radio hardware 
+    Abstract base class defining the required interface for all radio hardware
     drivers (e.g., Meshtastic, Mesh Core).
     """
 
@@ -86,7 +92,7 @@ class BaseRadioDriver(abc.ABC):
 
 class MeshtasticDriver(BaseRadioDriver):
     """
-    Adapter for the Meshtastic Python library, mapping the standard BBS driver 
+    Adapter for the Meshtastic Python library, mapping the standard BBS driver
     interface to Meshtastic-specific method calls.
     """
 
@@ -102,6 +108,32 @@ class MeshtasticDriver(BaseRadioDriver):
         self.interface = interface
         self._bbs_nodes = bbs_nodes if bbs_nodes is not None else []
         self._allowed_nodes = allowed_nodes if allowed_nodes is not None else []
+        self._lifecycle = threading.Condition()
+        self._active_calls = 0
+        self._closing = False
+        self._closed = False
+
+    @contextmanager
+    def _driver_call(self):
+        """
+        Serializes driver shutdown against in-flight operations.
+
+        New callers are fenced out as soon as close() begins, while the closer
+        waits for already-running driver calls to drain before the underlying
+        Meshtastic interface is torn down.
+        """
+        with self._lifecycle:
+            if self._closing or self._closed:
+                raise DriverClosedError("Radio driver is closing or already closed")
+            self._active_calls += 1
+
+        try:
+            yield self.interface
+        finally:
+            with self._lifecycle:
+                self._active_calls -= 1
+                if self._active_calls == 0:
+                    self._lifecycle.notify_all()
 
     @property
     def bbs_nodes(self):
@@ -116,52 +148,78 @@ class MeshtasticDriver(BaseRadioDriver):
     @property
     def myInfo(self):
         # Maintained for backward compatibility with the legacy server watchdog logic.
-        return self.interface.myInfo
+        with self._driver_call() as interface:
+            return interface.myInfo
 
     @property
     def nodes(self):
         # Maintained for legacy code that performs direct dictionary access on node lists.
-        return self.interface.nodes
+        with self._driver_call() as interface:
+            return interface.nodes
 
     def send_text(self, text, destination_id, want_ack=True):
-        return self.interface.sendText(
-            text=text,
-            destinationId=destination_id,
-            wantAck=want_ack,
-            wantResponse=False,
-        )
+        with self._driver_call() as interface:
+            return interface.sendText(
+                text=text,
+                destinationId=destination_id,
+                wantAck=want_ack,
+                wantResponse=False,
+            )
 
     def get_nodes(self):
-        return self.interface.nodes
+        with self._driver_call() as interface:
+            return interface.nodes
 
     def get_node_by_num(self, node_num):
-        for _, node in self.interface.nodes.items():
+        for _, node in self.get_nodes().items():
             if node["num"] == node_num:
                 return node
         return None
 
     def get_my_node_id(self):
-        return self.interface.myInfo.my_node_id
+        with self._driver_call() as interface:
+            return interface.myInfo.my_node_id
 
     def get_my_node_num(self):
-        return self.interface.myInfo.my_node_num
+        with self._driver_call() as interface:
+            return interface.myInfo.my_node_num
 
     def get_short_name(self, node_id):
-        node_info = self.interface.nodes.get(node_id)
+        node_info = self.get_nodes().get(node_id)
         if node_info and node_info.get("user"):
             return node_info["user"].get("shortName")
         return None
 
     def getNode(self, node_id):
-        return self.interface.getNode(node_id)
+        with self._driver_call() as interface:
+            return interface.getNode(node_id)
 
     def close(self):
-        return self.interface.close()
+        with self._lifecycle:
+            if self._closed:
+                return None
+
+            if self._closing:
+                while not self._closed:
+                    self._lifecycle.wait()
+                return None
+
+            self._closing = True
+            while self._active_calls > 0:
+                self._lifecycle.wait()
+
+        try:
+            return self.interface.close()
+        finally:
+            with self._lifecycle:
+                self._closed = True
+                self._closing = False
+                self._lifecycle.notify_all()
 
 
 class MeshCoreStubDriver(BaseRadioDriver):
     """
-    Placeholder driver for future Mesh Core integration. Provides a safe 
+    Placeholder driver for future Mesh Core integration. Provides a safe
     no-op environment for development without active radio hardware.
     """
 

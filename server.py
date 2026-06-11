@@ -277,6 +277,8 @@ Multi-Mode BBS Engine
 
         if self.driver:
             try:
+                # close() fences new packet work immediately, then drains any
+                # driver calls already in progress before tearing down the radio.
                 self.driver.close()
             except Exception:
                 logger.exception("Error closing driver")
