@@ -29,17 +29,17 @@ def send_message(message, destination, driver):
     Sends a text message, splitting it into chunks if it exceeds the radio MTU.
     Handles connection errors and provides decoupled logging for reliability.
     """
-    # Normalize the destination to a stable node ID up-front to ensure 
-    # consistency across the radio call and logging.
+    # Normalize the destination to a stable node ID up-front when it comes
+    # from the node map, but preserve driver-specific string destinations
+    # such as broadcasts when they do not exist in the node table.
     try:
         dest_id = get_node_id_from_num(destination, driver)
-        if not dest_id and isinstance(destination, str) and destination.startswith('!'):
-            # If it's already a node ID, use it.
+        if not dest_id and isinstance(destination, str) and destination:
             dest_id = destination
     except Exception:
         logger.exception(f"Failed to resolve destination ID: {destination}")
         return False
-        
+
     if not dest_id:
         logger.error(f"Could not resolve destination {destination} to a valid node ID")
         return False
