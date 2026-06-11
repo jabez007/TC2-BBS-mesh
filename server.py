@@ -18,11 +18,10 @@ import time
 
 from pubsub import pub
 
-from config_init import get_interface, init_cli_parser, initialize_config, merge_config
+from config_init import get_driver, init_cli_parser, initialize_config, merge_config
 from database_core import initialize_database, set_db_path
 from js8call_integration import JS8CallClient
 from message_processing import init_executor, on_receive, shutdown_executor
-from radio_drivers import MeshtasticDriver
 
 try:
     from pubsub.core.topicmgr import TopicNameError
@@ -202,9 +201,15 @@ Multi-Mode BBS Engine
             raw_interface: The underlying library-level radio interface.
         """
         last_keepalive_sent = 0
+        transport_watchdog_enabled = raw_interface is not None
 
         while self.running:
             now = time.time()
+
+            if not transport_watchdog_enabled:
+                self._write_heartbeat("CONNECTED", reader_alive=True)
+                time.sleep(self.heartbeat_interval)
+                continue
 
             # Layer 1: Hardware-level check for TCP disconnects.
             if (
@@ -311,18 +316,14 @@ Multi-Mode BBS Engine
         """
         self._display_banner()
         self._setup_config()
+        assert self.config is not None
 
         try:
             while self.running:
                 try:
                     init_executor()
 
-                    raw_interface = get_interface(self.config)
-                    self.driver = MeshtasticDriver(
-                        raw_interface,
-                        bbs_nodes=self.config["bbs_nodes"],
-                        allowed_nodes=self.config["allowed_nodes"]
-                    )
+                    self.driver, raw_interface = get_driver(self.config)
 
                     pub.subscribe(self._handle_packet, self.config["mqtt_topic"])
 

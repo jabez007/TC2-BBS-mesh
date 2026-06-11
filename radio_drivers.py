@@ -16,6 +16,18 @@ class BaseRadioDriver(abc.ABC):
     drivers (e.g., Meshtastic, Mesh Core).
     """
 
+    @property
+    @abc.abstractmethod
+    def bbs_nodes(self):
+        """Returns known peer BBS nodes for sync and keepalive logic."""
+        raise NotImplementedError
+
+    @property
+    @abc.abstractmethod
+    def allowed_nodes(self):
+        """Returns nodes that are authorized for administrative actions."""
+        raise NotImplementedError
+
     @abc.abstractmethod
     def send_text(self, text, destination_id, want_ack=True):
         """

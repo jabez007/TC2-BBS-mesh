@@ -9,7 +9,13 @@ import meshtastic.stream_interface
 import meshtastic.tcp_interface
 import serial.tools.list_ports
 
+from radio_drivers import BaseRadioDriver, MeshCoreStubDriver, MeshtasticDriver
+
 logger = logging.getLogger(__name__)
+
+DEFAULT_DRIVER_TYPE = "meshtastic"
+DRIVER_CHOICES = (DEFAULT_DRIVER_TYPE, "meshcore_stub")
+MESHTASTIC_INTERFACE_CHOICES = ("serial", "tcp")
 
 
 def init_cli_parser() -> argparse.Namespace:
@@ -19,18 +25,26 @@ def init_cli_parser() -> argparse.Namespace:
     Returns:
         argparse.Namespace: Object containing the parsed CLI arguments.
     """
-    parser = argparse.ArgumentParser(description="Meshtastic BBS system")
+    parser = argparse.ArgumentParser(description="TC²-BBS system")
 
     parser.add_argument(
         "--config", "-c", action="store", help="System configuration file", default=None
     )
 
     parser.add_argument(
+        "--driver-type",
+        action="store",
+        choices=DRIVER_CHOICES,
+        help="Radio driver backend",
+        default=None,
+    )
+
+    parser.add_argument(
         "--interface-type",
         "-i",
         action="store",
-        choices=["serial", "tcp"],
-        help="Node interface type",
+        choices=MESHTASTIC_INTERFACE_CHOICES,
+        help="Meshtastic transport type",
         default=None,
     )
 
@@ -83,6 +97,9 @@ def merge_config(
         dict: The updated system configuration dictionary.
     """
 
+    if args.driver_type is not None:
+        system_config["driver_type"] = args.driver_type
+
     if args.interface_type is not None:
         system_config["interface_type"] = args.interface_type
 
@@ -119,7 +136,12 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
         config_file = "config.ini"
     config.read(config_file)
 
-    interface_type = config["interface"]["type"]
+    driver_type = (
+        config["interface"].get("driver", DEFAULT_DRIVER_TYPE).strip().lower()
+    )
+    interface_type = config["interface"].get("type", None)
+    if interface_type is not None:
+        interface_type = interface_type.strip().lower()
     hostname = config["interface"].get("hostname", None)
     port = config["interface"].get("port", None)
 
@@ -140,6 +162,7 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
 
     return {
         "config": config,
+        "driver_type": driver_type,
         "interface_type": interface_type,
         "hostname": hostname,
         "port": port,
@@ -166,7 +189,9 @@ def get_interface(
     Raises:
         ValueError: If configuration is incomplete or ambiguous (e.g., multiple ports).
     """
-    if system_config["interface_type"] == "serial":
+    interface_type = system_config.get("interface_type")
+
+    if interface_type == "serial":
         if system_config["port"]:
             return meshtastic.serial_interface.SerialInterface(system_config["port"])
         else:
@@ -181,7 +206,7 @@ def get_interface(
                 )
             else:
                 raise ValueError("No serial ports detected.")
-    elif system_config["interface_type"] == "tcp":
+    elif interface_type == "tcp":
         if not system_config["hostname"]:
             raise ValueError("Hostname must be specified for TCP interface")
         interface = meshtastic.tcp_interface.TCPInterface(
@@ -206,3 +231,35 @@ def get_interface(
         return interface
     else:
         raise ValueError("Invalid interface type specified in config file")
+
+
+def get_driver(
+    system_config: dict[str, Any],
+) -> tuple[BaseRadioDriver, meshtastic.stream_interface.StreamInterface | None]:
+    """Builds the configured radio driver and optional raw transport handle.
+
+    Meshtastic drivers expose the underlying stream interface for transport-level
+    watchdog checks in the server loop. Driver backends without a Meshtastic
+    transport return None for the raw interface.
+    """
+
+    driver_type = system_config.get("driver_type", DEFAULT_DRIVER_TYPE)
+
+    if driver_type == DEFAULT_DRIVER_TYPE:
+        raw_interface = get_interface(system_config)
+        return (
+            MeshtasticDriver(
+                raw_interface,
+                bbs_nodes=system_config["bbs_nodes"],
+                allowed_nodes=system_config["allowed_nodes"],
+            ),
+            raw_interface,
+        )
+
+    if driver_type == "meshcore_stub":
+        return MeshCoreStubDriver(system_config), None
+
+    raise ValueError(
+        "Invalid driver type specified in config file. "
+        f"Expected one of: {', '.join(DRIVER_CHOICES)}"
+    )
