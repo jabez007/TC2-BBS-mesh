@@ -231,8 +231,11 @@ class MeshtasticDriver(BaseRadioDriver):
 
 class MeshCoreStubDriver(BaseRadioDriver):
     """
-    Placeholder driver for future Mesh Core integration. Provides a safe
-    no-op environment for development without active radio hardware.
+    Placeholder driver for future Mesh Core integration.
+
+    Provides a safe no-op environment for development without active radio
+    hardware while preserving the configured peer topology and permission fence
+    used by higher layers.
     """
 
     def __init__(self, config):
@@ -241,15 +244,17 @@ class MeshCoreStubDriver(BaseRadioDriver):
             config: The system configuration dictionary.
         """
         self.config = config
+        self._bbs_nodes = list(config.get("bbs_nodes") or [])
+        self._allowed_nodes = list(config.get("allowed_nodes") or [])
         logger.info("Mesh Core Driver Stub initialized (Hardware not yet connected)")
 
     @property
     def bbs_nodes(self):
-        return []
+        return self._bbs_nodes
 
     @property
     def allowed_nodes(self):
-        return []
+        return self._allowed_nodes
 
     def send_text(self, text, destination_id, want_ack=True):
         logger.info(f"MESH CORE STUB: Sending '{text}' to {destination_id}")
