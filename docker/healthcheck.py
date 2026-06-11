@@ -10,6 +10,10 @@ from pathlib import Path
 
 import math
 
+DEFAULT_HEARTBEAT_INTERVAL = 10
+LOW_POWER_HEARTBEAT_INTERVAL = 120
+DEFAULT_HEARTBEAT_MAX_AGE = 60
+
 # Configurable healthcheck timeout (defaults to 10 minutes)
 # Usually 2x the server's reconnect watchdog (2 * 300s = 600s)
 try:
@@ -53,6 +57,40 @@ def get_app_root(config_path):
     if config_file.parent.name == "config":
         return config_file.parent.parent
     return config_file.parent
+
+
+def get_effective_heartbeat_interval(config):
+    """Return the heartbeat cadence the server will actually use."""
+    heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
+    low_power = False
+
+    if config is not None:
+        try:
+            heartbeat_interval = config.getint(
+                "healthcheck",
+                "heartbeat_interval",
+                fallback=DEFAULT_HEARTBEAT_INTERVAL,
+            )
+        except (configparser.Error, TypeError, ValueError):
+            heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
+
+        try:
+            low_power = config.getboolean("healthcheck", "low_power", fallback=False)
+        except (configparser.Error, TypeError, ValueError):
+            low_power = False
+
+    if heartbeat_interval <= 0:
+        heartbeat_interval = DEFAULT_HEARTBEAT_INTERVAL
+
+    if low_power:
+        heartbeat_interval = LOW_POWER_HEARTBEAT_INTERVAL
+
+    return heartbeat_interval
+
+
+def get_heartbeat_max_age(config):
+    """Return the heartbeat staleness threshold expected by this node."""
+    return max(DEFAULT_HEARTBEAT_MAX_AGE, get_effective_heartbeat_interval(config))
 
 
 def check_meshtastic_connection(host="localhost", port=4403):
@@ -342,8 +380,9 @@ def main():
         sys.exit(1)
     
     # 2. Check heartbeat (Source of Truth for connection health)
-    print("Running heartbeat health check...")
-    if not check_heartbeat(server_pid):
+    heartbeat_max_age = get_heartbeat_max_age(config)
+    print(f"Running heartbeat health check (max age {heartbeat_max_age}s)...")
+    if not check_heartbeat(server_pid, max_age=heartbeat_max_age):
         print("Heartbeat health check failed")
         sys.exit(1)
 

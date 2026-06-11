@@ -7,6 +7,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
+
 healthcheck = importlib.import_module("docker.healthcheck")
 
 
@@ -18,6 +21,20 @@ def pushd(path):
         yield
     finally:
         os.chdir(previous)
+
+
+def build_config(*, heartbeat_interval=None, low_power=None, db_path=None):
+    config = configparser.ConfigParser()
+    if heartbeat_interval is not None or low_power is not None:
+        config.add_section("healthcheck")
+        if heartbeat_interval is not None:
+            config.set("healthcheck", "heartbeat_interval", str(heartbeat_interval))
+        if low_power is not None:
+            config.set("healthcheck", "low_power", str(low_power))
+    if db_path is not None:
+        config.add_section("database")
+        config.set("database", "db_path", db_path)
+    return config
 
 
 class HealthcheckDatabasePathTests(unittest.TestCase):
@@ -33,8 +50,7 @@ class HealthcheckDatabasePathTests(unittest.TestCase):
             db_path.parent.mkdir()
             db_path.touch()
 
-            config = configparser.ConfigParser()
-            config.read_dict({"database": {"db_path": "data/mesh.db"}})
+            config = build_config(db_path="data/mesh.db")
             config_path = config_dir / "config.ini"
             config_path.write_text("[database]\ndb_path = data/mesh.db\n", encoding="utf-8")
 
@@ -53,8 +69,7 @@ class HealthcheckDatabasePathTests(unittest.TestCase):
             db_path.parent.mkdir()
             db_path.touch()
 
-            config = configparser.ConfigParser()
-            config.read_dict({"database": {"db_path": str(db_path)}})
+            config = build_config(db_path=str(db_path))
             config_path = config_dir / "config.ini"
             config_path.write_text(
                 f"[database]\ndb_path = {db_path}\n",
@@ -71,8 +86,7 @@ class HealthcheckDatabasePathTests(unittest.TestCase):
             config_dir.mkdir()
             (root / healthcheck.DEFAULT_DB_NAME).touch()
 
-            config = configparser.ConfigParser()
-            config.read_dict({"database": {"db_path": "missing/mesh.db"}})
+            config = build_config(db_path="missing/mesh.db")
             config_path = config_dir / "config.ini"
             config_path.write_text("[database]\ndb_path = missing/mesh.db\n", encoding="utf-8")
 
@@ -91,8 +105,7 @@ class HealthcheckDatabasePathTests(unittest.TestCase):
             env_db.parent.mkdir()
             env_db.touch()
 
-            config = configparser.ConfigParser()
-            config.read_dict({"database": {"db_path": "configured/mesh.db"}})
+            config = build_config(db_path="configured/mesh.db")
             config_path = config_dir / "config.ini"
             config_path.write_text("[database]\ndb_path = configured/mesh.db\n", encoding="utf-8")
 
@@ -123,6 +136,62 @@ class HealthcheckDatabasePathTests(unittest.TestCase):
                 candidates, source = healthcheck.get_database_candidates(None, None)
                 self.assertEqual(source, f"default {healthcheck.DEFAULT_DB_NAME}")
                 self.assertEqual(candidates, [str(expected.resolve())])
+
+
+def test_heartbeat_max_age_defaults_to_base_threshold_without_config():
+    assert healthcheck.get_effective_heartbeat_interval(None) == 10
+    assert healthcheck.get_heartbeat_max_age(None) == 60
+
+
+def test_heartbeat_max_age_matches_low_power_server_override():
+    config = build_config(heartbeat_interval=15, low_power=True)
+
+    assert healthcheck.get_effective_heartbeat_interval(config) == 120
+    assert healthcheck.get_heartbeat_max_age(config) == 120
+
+
+def test_heartbeat_max_age_respects_non_low_power_custom_interval_above_default():
+    config = build_config(heartbeat_interval=90, low_power=False)
+
+    assert healthcheck.get_effective_heartbeat_interval(config) == 90
+    assert healthcheck.get_heartbeat_max_age(config) == 90
+
+
+def test_heartbeat_config_falls_back_cleanly_on_invalid_values():
+    config = configparser.ConfigParser()
+    config.add_section("healthcheck")
+    config.set("healthcheck", "heartbeat_interval", "0")
+    config.set("healthcheck", "low_power", "definitely-not-bool")
+
+    assert healthcheck.get_effective_heartbeat_interval(config) == 10
+    assert healthcheck.get_heartbeat_max_age(config) == 60
+
+
+def test_main_passes_computed_heartbeat_max_age_to_check(monkeypatch, capsys):
+    config = build_config(heartbeat_interval=15, low_power=True)
+    observed = {}
+
+    monkeypatch.setattr(healthcheck, "get_config", lambda: (config, "config.ini"))
+    monkeypatch.setattr(healthcheck, "check_files", lambda config, config_path: True)
+    monkeypatch.setattr(healthcheck, "check_process_health", lambda: (True, "123"))
+
+    def fake_check_heartbeat(server_pid, max_age=60):
+        observed["call"] = (server_pid, max_age)
+        return True
+
+    monkeypatch.setattr(healthcheck, "check_heartbeat", fake_check_heartbeat)
+    monkeypatch.setattr(
+        healthcheck,
+        "check_meshtastic_connection",
+        lambda host="localhost", port=4403: (True, "ok"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        healthcheck.main()
+
+    assert exc_info.value.code == 0
+    assert observed["call"] == ("123", 120)
+    assert "Running heartbeat health check (max age 120s)..." in capsys.readouterr().out
 
 
 if __name__ == "__main__":
