@@ -243,15 +243,19 @@ def initialize_database():
     if conn is None:
         return False
     
-    # If a transaction is already active on this connection (e.g. from a caller), 
-    # we skip the 'BEGIN EXCLUSIVE' and rely on the existing transaction's atomicity.
+    # If a transaction is already active on this connection (e.g. from a caller),
+    # create a savepoint so schema setup can roll back without poisoning the
+    # caller's outer transaction.
     manage_transaction = not conn.in_transaction
+    savepoint_name = "sp_initialize_database"
+    savepoint_active = False
     
     try:
         if manage_transaction:
             conn.execute("BEGIN EXCLUSIVE")
         else:
-            conn.execute("SAVEPOINT sp_init")
+            conn.execute(f"SAVEPOINT {savepoint_name}")
+            savepoint_active = True
         
         c = conn.cursor()
         c.execute('''CREATE TABLE IF NOT EXISTS mesh_bulletins (
@@ -310,18 +314,25 @@ def initialize_database():
         
         if manage_transaction:
             conn.commit()
-        else:
-            conn.execute("RELEASE SAVEPOINT sp_init")
+        elif savepoint_active:
+            conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+            savepoint_active = False
             
         logger.info("Database schema initialized and migrated successfully.")
         return True
     except sqlite3.Error:
         if manage_transaction:
             conn.rollback()
-        else:
+        elif savepoint_active:
             try:
-                conn.execute("ROLLBACK TO SAVEPOINT sp_init")
+                conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint_name}")
             except sqlite3.Error:
                 logger.debug("Failed to rollback to savepoint during initialization", exc_info=True)
+            finally:
+                try:
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
+                except sqlite3.Error:
+                    logger.debug("Failed to release savepoint during initialization rollback", exc_info=True)
+                savepoint_active = False
         logger.exception("Failed to initialize database schema")
         return False
