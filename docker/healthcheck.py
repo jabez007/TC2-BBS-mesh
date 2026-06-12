@@ -142,7 +142,10 @@ def get_database_candidates(config, config_path):
     """Resolve candidate database paths using the same precedence as the server."""
     configured_db_path = None
     if config is not None:
-        configured_db_path = config.get("database", "db_path", fallback=None)
+        try:
+            configured_db_path = config.get("database", "db_path", fallback=None)
+        except (configparser.Error, TypeError, ValueError):
+            configured_db_path = None
 
     if configured_db_path:
         return _expand_db_candidates(configured_db_path, config_path), "[database] db_path"

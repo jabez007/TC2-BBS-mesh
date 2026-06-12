@@ -115,6 +115,26 @@ class HealthcheckDatabasePathTests(unittest.TestCase):
                 self.assertEqual(source, "[database] db_path")
                 self.assertEqual(candidates[0], str(configured_db.resolve()))
 
+    def test_malformed_configured_db_path_falls_back_to_env(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            config_dir = root / "config"
+            config_dir.mkdir()
+            env_db = root / "env" / "mesh.db"
+            env_db.parent.mkdir()
+            env_db.touch()
+
+            config = configparser.ConfigParser()
+            config.read_string("[database]\ndb_path = %(missing)s\n")
+            config_path = config_dir / "config.ini"
+            config_path.write_text("[database]\ndb_path = %(missing)s\n", encoding="utf-8")
+
+            with pushd(root), patch.dict(os.environ, {"BBS_DB_PATH": str(env_db)}, clear=False):
+                self.assertTrue(healthcheck.check_files(config, str(config_path)))
+                candidates, source = healthcheck.get_database_candidates(config, str(config_path))
+                self.assertEqual(source, "BBS_DB_PATH")
+                self.assertEqual(candidates, [str(env_db.resolve())])
+
     def test_relative_env_db_path_without_config_uses_cwd(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
