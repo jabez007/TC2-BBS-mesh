@@ -73,7 +73,9 @@ If you're a Docker user, TC²-BBS Meshtastic is available on Docker Hub!
    You'll need to open up the config.ini file in a text editor and make your changes following the instructions below
    
    **[interface]**  
-   If using `type = serial` and you have multiple devices connected, you will need to uncomment the `port =` line and enter the port of your device.   
+   Set `driver = meshtastic` for the current Meshtastic runtime or `driver = meshcore_stub` to boot the future MeshCore stub without opening serial/TCP hardware.  
+   
+   If using `driver = meshtastic` with `type = serial` and you have multiple devices connected, you will need to uncomment the `port =` line and enter the port of your device.   
    
    Linux Example:  
    `port = /dev/ttyUSB0`   
@@ -81,8 +83,8 @@ If you're a Docker user, TC²-BBS Meshtastic is available on Docker Hub!
    Windows Example:  
    `port = COM3`   
    
-   If using type = tcp you will need to uncomment the hostname = 192.168.x.x line and put in the IP address of your Meshtastic device.  
-   
+   If using `driver = meshtastic` with `type = tcp` you will need to uncomment the hostname = 192.168.x.x line and put in the IP address of your Meshtastic device.  
+
    **[sync]**  
    Enter a list of other BBS nodes you would like to sync messages and bulletins with. Separate each by comma and no spaces as shown in the example below.   
    You can find the nodeID in the menu under `Radio Configuration > User` for each node, or use this script for getting nodedb data from a device:  
@@ -93,10 +95,11 @@ If you're a Docker user, TC²-BBS Meshtastic is available on Docker Hub!
    
    ```ini
    [interface]  
+   driver = meshtastic  
    type = serial  
    # port = /dev/ttyUSB0  
    # hostname = 192.168.x.x  
-   
+
    [sync]  
    bbs_nodes = !f53f4abc,!f3abc123  
    ```
@@ -123,16 +126,21 @@ $ python server.py --help
    ╚═╝    ╚═════╝╚══════╝      ╚═════╝ ╚═════╝ ╚══════╝
 Meshtastic Version
 
-usage: server.py [-h] [--config CONFIG] [--interface-type {serial,tcp}] [--port PORT] [--host HOST] [--mqtt-topic MQTT_TOPIC]
+usage: server.py [-h] [--config CONFIG]
+                [--driver-type {meshtastic,meshcore_stub}]
+                [--interface-type {serial,tcp}] [--port PORT] [--host HOST]
+                [--mqtt-topic MQTT_TOPIC]
 
-Meshtastic BBS system
+TC²-BBS system
 
 options:
   -h, --help            show this help message and exit
   --config CONFIG, -c CONFIG
                         System configuration file
+  --driver-type {meshtastic,meshcore_stub}
+                        Radio driver backend
   --interface-type {serial,tcp}, -i {serial,tcp}
-                        Node interface type
+                        Meshtastic transport type
   --port PORT, -p PORT  Serial port
   --host HOST           TCP host address
   --mqtt-topic MQTT_TOPIC, -t MQTT_TOPIC
