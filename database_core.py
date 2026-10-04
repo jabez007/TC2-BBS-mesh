@@ -224,8 +224,10 @@ def _copy_legacy_rows(cursor, source, new_table, cols):
     else:
         col_list = [c.strip() for c in cols.split(',')]
         where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
-        # We GROUP BY all columns from the source to ensure that if the legacy
-        # table contains duplicates, only a single unique row is considered for migration.
+        # NOT EXISTS only sees rows already in the new table (SQLite reads the
+        # source before inserting), so identical rows within one legacy table
+        # are kept: each had its own id there. legacy_imports, not content
+        # matching, is what stops a file from being imported twice.
         cursor.execute(f"""
             INSERT INTO {new_table} ({cols})
             SELECT {cols} FROM {source} o
@@ -233,7 +235,6 @@ def _copy_legacy_rows(cursor, source, new_table, cols):
                 SELECT 1 FROM {new_table} n
                 WHERE {where_clause}
             )
-            GROUP BY {cols}
         """)
 
     skipped = total - cursor.rowcount

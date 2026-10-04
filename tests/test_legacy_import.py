@@ -172,3 +172,23 @@ def test_unreadable_legacy_file_does_not_block_startup_or_other_imports(app_dir)
     import db_admin
 
     assert [row[1:4] for row in db_admin.list_ham_messages()] == [("K1ABC", "W2XYZ", "QSL")]
+
+
+def test_upgrade_keeps_repeated_js8call_messages(app_dir):
+    # The old table had its own id per row, so identical rows are separate records.
+    path = app_dir / "js8call.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(MAIN_JS8CALL_SCHEMA)
+    for _ in range(2):
+        conn.execute(
+            "INSERT INTO messages (sender, receiver, message, timestamp) "
+            "VALUES ('K1ABC', 'W2XYZ', 'QSL', '2026-01-01 10:00:00')"
+        )
+    conn.commit()
+    conn.close()
+
+    assert database_core.initialize_database()
+
+    import db_admin
+
+    assert len(db_admin.list_ham_messages()) == 2
