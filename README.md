@@ -114,6 +114,12 @@ python server.py
 
 Be sure you've followed the Python virtual environment steps above and activated it before running.
 
+### Upgrading from an earlier release
+
+Earlier releases kept their data in `bulletins.db` and `js8call.db`. This release keeps everything in one file, `bbs.db`. You can move it with `db_path` in the `[database]` section of `config.ini`.
+
+On the first start after upgrading, the BBS copies bulletins, mail, channels, and JS8Call messages from the old files into `bbs.db`. It reads `bulletins.db` and `js8call.db` from the application folder and from the folder `bbs.db` is in. It also reads the file named by `[js8call] db_file` if that setting is still in your config. It never changes the old files, and it imports each one only once. Check the log for any rows it skipped, then delete the old files when you're happy with the result.
+
 ## Command line arguments
 ```
 $ python server.py --help
