@@ -289,6 +289,7 @@ def check_heartbeat(server_pid, max_age=60):
                     return False
 
                 is_connected = (status == "CONNECTED")
+                rx_tracked = True
                 
                 # Check extended metrics if available
                 reader_alive = True
@@ -296,7 +297,10 @@ def check_heartbeat(server_pid, max_age=60):
                     reader_alive = (parts[2].lower() == 'true')
                 
                 last_rx_time = mtime
-                if len(parts) >= 4:
+                if len(parts) >= 4 and parts[3] == "-":
+                    # Drivers without a radio transport (meshcore_stub) never receive.
+                    rx_tracked = False
+                elif len(parts) >= 4:
                     try:
                         val = float(parts[3])
                         if math.isfinite(val):
@@ -317,6 +321,7 @@ def check_heartbeat(server_pid, max_age=60):
                 is_connected = False
                 reader_alive = False
                 last_rx_time = 0
+                rx_tracked = True
                 status = "LEGACY_OR_MALFORMED"
 
         # Prevent negative ages from future timestamps
@@ -349,7 +354,7 @@ def check_heartbeat(server_pid, max_age=60):
             
         # 4. Packet timeout check (has it received anything lately?)
         # Marginal delay (RX_TIMEOUT defaults to 600s = 2 x 300s server reconnect timeout)
-        if rx_age > RX_TIMEOUT:
+        if rx_tracked and rx_age > RX_TIMEOUT:
             print(f"No radio data received for {rx_age:.1f}s (zombie state)")
             return False
             
@@ -357,7 +362,8 @@ def check_heartbeat(server_pid, max_age=60):
         print(f"Error checking heartbeat file: {e}")
         return False
     else:
-        print(f"BBS is healthy: {status}, Reader: {reader_alive}, LastRX: {int(rx_age)}s ago")
+        last_rx_note = f"{int(rx_age)}s ago" if rx_tracked else "not tracked"
+        print(f"BBS is healthy: {status}, Reader: {reader_alive}, LastRX: {last_rx_note}")
         return True
 
 

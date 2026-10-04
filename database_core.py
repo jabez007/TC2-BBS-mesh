@@ -39,10 +39,25 @@ def set_db_path(path):
         thread_local.connection = None
         thread_local.conn_version = None
 
+def _read_module_config(section, option):
+    """Reads one option from the config.ini beside this module, or None."""
+    config_file = Path(__file__).parent.resolve() / 'config.ini'
+    if not config_file.exists():
+        return None
+    config = configparser.ConfigParser()
+    try:
+        config.read(config_file)
+        return config.get(section, option, fallback=None)
+    except configparser.Error:
+        logger.debug(f"Failed to read [{section}] {option} from {config_file}", exc_info=True)
+        return None
+
+
 def get_db_path():
     """
-    Resolves the effective path for the SQLite database based on environment, 
-    config, or defaults.
+    Resolves the effective path for the SQLite database: a path set with
+    set_db_path(), then config.ini [database] db_path, then BBS_DB_PATH, then
+    the default.
 
     Returns:
         str: Absolute path to the database file.
@@ -55,17 +70,12 @@ def get_db_path():
             path_obj = (module_dir / path_obj).resolve()
         return str(path_obj)
         
-    config_file = module_dir / 'config.ini'
-    config = configparser.ConfigParser()
-    db_path = os.environ.get('BBS_DB_PATH')
-    
-    if not db_path and config_file.exists():
-        try:
-            config.read(config_file)
-            db_path = config.get('database', 'db_path', fallback=None)
-        except configparser.Error:
-            logger.debug(f"Failed to read database config from {config_file}", exc_info=True)
-            
+    # Config wins over the environment, matching server.py and the healthcheck.
+    db_path = _read_module_config('database', 'db_path')
+
+    if not db_path:
+        db_path = os.environ.get('BBS_DB_PATH')
+
     if not db_path:
         db_path = DEFAULT_DB_PATH
         
@@ -173,61 +183,158 @@ def close_db_connection():
             thread_local.connection = None
             thread_local.conn_version = None
 
+# (old table, new table, columns) for data written by the pre-refactor schema.
+LEGACY_TABLES = [
+    ('bulletins', 'mesh_bulletins', 'board, sender_short_name, date, subject, content, unique_id'),
+    ('mail', 'mesh_mail', 'sender, sender_short_name, recipient, date, subject, content, unique_id'),
+    ('channels', 'mesh_channels', 'name, url'),
+    ('messages', 'ham_messages', 'sender, receiver, message, timestamp'),
+    ('groups', 'ham_groups', 'sender, groupname, message, timestamp'),
+    ('urgent', 'ham_urgent', 'sender, groupname, message, timestamp')
+]
+
+# Database files the pre-refactor code kept next to the application.
+LEGACY_DB_FILES = ('bulletins.db', 'js8call.db')
+LEGACY_SCHEMA = 'legacy_src'
+
+
+def _table_exists(cursor, schema, table):
+    cursor.execute(f"SELECT 1 FROM {schema}.sqlite_master WHERE type='table' AND name=?", (table,))
+    return cursor.fetchone() is not None
+
+
+def _copy_legacy_rows(cursor, source, new_table, cols):
+    """
+    Copies rows from a legacy table into its new table and reports rows it skipped.
+
+    Args:
+        cursor (sqlite3.Cursor): Cursor inside the caller's transaction.
+        source (str): Schema-qualified legacy table, e.g. 'main.mail'.
+        new_table (str): Destination table.
+        cols (str): Comma-separated column list shared by both tables.
+    """
+    cursor.execute(f"SELECT COUNT(*) FROM {source}")
+    total = cursor.fetchone()[0]
+
+    # Tables with strict UNIQUE constraints use INSERT OR IGNORE to handle
+    # duplicates across sync merges. Ham tables don't have unique IDs
+    # so we manually deduplicate on content to prevent sync loops.
+    if new_table in ('mesh_bulletins', 'mesh_mail', 'mesh_channels'):
+        cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {source}")
+    else:
+        col_list = [c.strip() for c in cols.split(',')]
+        where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
+        # We GROUP BY all columns from the source to ensure that if the legacy
+        # table contains duplicates, only a single unique row is considered for migration.
+        cursor.execute(f"""
+            INSERT INTO {new_table} ({cols})
+            SELECT {cols} FROM {source} o
+            WHERE NOT EXISTS (
+                SELECT 1 FROM {new_table} n
+                WHERE {where_clause}
+            )
+            GROUP BY {cols}
+        """)
+
+    skipped = total - cursor.rowcount
+    if skipped > 0:
+        logger.warning(
+            f"Skipped {skipped} of {total} rows from {source} while migrating to {new_table} "
+            "(duplicates, or rows missing a required field). The originals are left in place."
+        )
+
+
+def _free_backup_name(cursor, old_table):
+    """Returns a legacy_* table name that won't overwrite an earlier backup."""
+    name = f"legacy_{old_table}"
+    suffix = 2
+    while _table_exists(cursor, 'main', name):
+        name = f"legacy_{old_table}_{suffix}"
+        suffix += 1
+    return name
+
+
 def _migrate_legacy_data(conn):
     """
     Orchestrates the migration of data from legacy tables to the new prefixed schema.
     Relies on the caller to manage the transaction.
-    
+
     Args:
         conn (sqlite3.Connection): The database connection to use for the migration.
     """
     cursor = conn.cursor()
-    
-    migrations = [
-        ('bulletins', 'mesh_bulletins', 'board, sender_short_name, date, subject, content, unique_id'),
-        ('mail', 'mesh_mail', 'sender, sender_short_name, recipient, date, subject, content, unique_id'),
-        ('channels', 'mesh_channels', 'name, url'),
-        ('messages', 'ham_messages', 'sender, receiver, message, timestamp'),
-        ('groups', 'ham_groups', 'sender, groupname, message, timestamp'),
-        ('urgent', 'ham_urgent', 'sender, groupname, message, timestamp')
-    ]
-    
+
     migrated_any = False
-    for old_table, new_table, cols in migrations:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (old_table,))
-        if cursor.fetchone():
+    for old_table, new_table, cols in LEGACY_TABLES:
+        if _table_exists(cursor, 'main', old_table):
             logger.info(f"Migrating legacy data from {old_table} to {new_table}...")
-            
-            # Tables with strict UNIQUE constraints use INSERT OR IGNORE to handle 
-            # duplicates across sync merges. Ham tables don't have unique IDs 
-            # so we manually deduplicate on content to prevent sync loops.
-            if new_table in ('mesh_bulletins', 'mesh_mail', 'mesh_channels'):
-                cursor.execute(f"INSERT OR IGNORE INTO {new_table} ({cols}) SELECT {cols} FROM {old_table}")
-            else:
-                col_list = [c.strip() for c in cols.split(',')]
-                where_clause = " AND ".join([f"n.{c} IS o.{c}" for c in col_list])
-                # We GROUP BY all columns from the source to ensure that if the legacy 
-                # table contains duplicates, only a single unique row is considered for migration.
-                cursor.execute(f"""
-                    INSERT INTO {new_table} ({cols}) 
-                    SELECT {cols} FROM {old_table} o 
-                    WHERE NOT EXISTS (
-                        SELECT 1 FROM {new_table} n 
-                        WHERE {where_clause}
-                    )
-                    GROUP BY {cols}
-                """)
-            
-            # We rename the old table to 'legacy_...' instead of dropping it to provide 
-            # a manual recovery path if the automated migration logic fails to capture 
+            _copy_legacy_rows(cursor, f"main.{old_table}", new_table, cols)
+
+            # We rename the old table to 'legacy_...' instead of dropping it to provide
+            # a manual recovery path if the automated migration logic fails to capture
             # specific edge-case data.
-            cursor.execute(f"DROP TABLE IF EXISTS legacy_{old_table}")
-            cursor.execute(f"ALTER TABLE {old_table} RENAME TO legacy_{old_table}")
-            logger.info(f"Successfully migrated {old_table}.")
+            backup = _free_backup_name(cursor, old_table)
+            cursor.execute(f"ALTER TABLE main.{old_table} RENAME TO {backup}")
+            logger.info(f"Successfully migrated {old_table}; original kept as {backup}.")
             migrated_any = True
-    
+
     if migrated_any:
         logger.info("Database migration data processed.")
+
+
+def _legacy_db_candidates(db_path):
+    """
+    Lists pre-refactor database files that may still hold data.
+
+    The old code kept bulletins.db and js8call.db beside the application (in
+    Docker, beside the database on the config volume), and js8call.db could be
+    moved with [js8call] db_file.
+    """
+    module_dir = Path(__file__).parent.resolve()
+    current = Path(db_path).resolve()
+
+    candidates = [d / name for d in (current.parent, module_dir) for name in LEGACY_DB_FILES]
+
+    js8_db_file = _read_module_config('js8call', 'db_file')
+    if js8_db_file:
+        js8_path = Path(js8_db_file)
+        candidates.append(js8_path if js8_path.is_absolute() else module_dir / js8_path)
+
+    result = []
+    for candidate in candidates:
+        candidate = candidate.resolve()
+        if candidate != current and candidate not in result and candidate.is_file():
+            result.append(candidate)
+    return result
+
+
+def _import_legacy_file(conn, source):
+    """
+    Copies data from one pre-refactor database file, once.
+
+    The file is left untouched. legacy_imports records the import so rows a
+    user deletes afterwards don't come back on the next start.
+    """
+    conn.execute(f"ATTACH DATABASE ? AS {LEGACY_SCHEMA}", (str(source),))
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1 FROM legacy_imports WHERE source_path = ?", (str(source),))
+            if cursor.fetchone() is None:
+                logger.info(f"Importing data from legacy database {source}...")
+                for old_table, new_table, cols in LEGACY_TABLES:
+                    if _table_exists(cursor, LEGACY_SCHEMA, old_table):
+                        _copy_legacy_rows(cursor, f"{LEGACY_SCHEMA}.{old_table}", new_table, cols)
+                cursor.execute("INSERT INTO legacy_imports (source_path) VALUES (?)", (str(source),))
+                logger.info(f"Imported {source}. The file was not modified and can be removed.")
+            conn.commit()
+        except sqlite3.Error:
+            conn.rollback()
+            raise
+    finally:
+        conn.execute(f"DETACH DATABASE {LEGACY_SCHEMA}")
+
 
 def initialize_database():
     """
@@ -309,6 +416,11 @@ def initialize_database():
                         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
                     )''')
         
+        c.execute('''CREATE TABLE IF NOT EXISTS legacy_imports (
+                        source_path TEXT PRIMARY KEY,
+                        imported_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                    )''')
+
         # Migrations are processed within the same exclusive transaction.
         _migrate_legacy_data(conn)
         
@@ -318,6 +430,17 @@ def initialize_database():
             conn.execute(f"RELEASE SAVEPOINT {savepoint_name}")
             savepoint_active = False
             
+        # ATTACH can't run inside a transaction, so separate files are
+        # imported after the schema commit, each in its own transaction.
+        # A bad old file is logged and retried next start; it must not stop
+        # the BBS or the import of the other file.
+        if manage_transaction:
+            for source in _legacy_db_candidates(get_db_path()):
+                try:
+                    _import_legacy_file(conn, source)
+                except sqlite3.Error:
+                    logger.exception(f"Could not import legacy database {source}; will retry on next start")
+
         logger.info("Database schema initialized and migrated successfully.")
         return True
     except sqlite3.Error:

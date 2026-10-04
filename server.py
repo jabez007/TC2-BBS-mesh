@@ -154,7 +154,7 @@ Multi-Mode BBS Engine
         except (ValueError, TypeError):
             return default
 
-    def _write_heartbeat(self, status, reader_alive=True):
+    def _write_heartbeat(self, status, reader_alive=True, track_rx=True):
         """
         Atomically writes extended health metrics to the heartbeat file.
         Uses a temp-and-move strategy to ensure external monitors never see partial writes.
@@ -162,10 +162,13 @@ Multi-Mode BBS Engine
         Args:
             status (str): Current application status (e.g., 'CONNECTED').
             reader_alive (bool): Whether the underlying radio reader is functional.
+            track_rx (bool): False for drivers with no radio transport. The
+                last-RX field is then written as '-' so the healthcheck skips
+                its no-traffic check.
         """
         now = time.time()
         with self.last_rx_lock:
-            last_rx = self.last_rx_time
+            last_rx = self.last_rx_time if track_rx else "-"
 
         content = f"{now}|{status}|{reader_alive}|{last_rx}"
         dir_name = os.path.dirname(self.heartbeat_path)
@@ -207,7 +210,7 @@ Multi-Mode BBS Engine
             now = time.time()
 
             if not transport_watchdog_enabled:
-                self._write_heartbeat("CONNECTED", reader_alive=True)
+                self._write_heartbeat("CONNECTED", reader_alive=True, track_rx=False)
                 time.sleep(self.heartbeat_interval)
                 continue
 
