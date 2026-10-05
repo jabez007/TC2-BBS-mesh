@@ -319,7 +319,7 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             send_message("I'm unable to find that node in my database.", sender_id, driver)
             handle_mail_command(sender_id, driver)
         elif len(nodes) == 1:
-            recipient_id = nodes[0]['num']
+            recipient_id = nodes[0]['id']
             recipient_name = get_node_name(recipient_id, driver)
             send_message(f"What is the subject of your message to {recipient_name}?\nKeep it short.", sender_id, driver)
             update_user_state(sender_id, {'command': 'MAIL', 'step': 5, 'recipient_id': recipient_id})
@@ -355,7 +355,7 @@ def handle_mail_steps(sender_id, message, step, state, driver, bbs_nodes):
             nodes = state.get('nodes', [])
             if 0 <= selected_node_index < len(nodes):
                 selected_node = nodes[selected_node_index]
-                recipient_id = selected_node['num']
+                recipient_id = selected_node['id']
                 recipient_name = get_node_name(recipient_id, driver)
                 send_message(f"What is the subject of your message to {recipient_name}?\nKeep it short.", sender_id, driver)
                 update_user_state(sender_id, {'command': 'MAIL', 'step': 5, 'recipient_id': recipient_id})
@@ -490,7 +490,7 @@ def handle_send_mail_command(sender_id, message, driver, bbs_nodes):
                          driver)
             return
 
-        recipient_id = nodes[0]['num']
+        recipient_id = nodes[0]['id']
         recipient_name = get_node_name(recipient_id, driver)
         sender_short_name = get_node_short_name(get_node_id_from_num(sender_id, driver), driver)
 

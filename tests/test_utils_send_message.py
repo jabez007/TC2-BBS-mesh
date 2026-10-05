@@ -70,10 +70,12 @@ def test_send_message_preserves_unmapped_string_destination(_sleep):
 
 
 @patch("utils.time.sleep", return_value=None)
-def test_send_message_rejects_unknown_numeric_destination(_sleep):
+def test_send_message_sends_unknown_numeric_destination_by_number(_sleep):
     driver = FakeDriver()
 
     result = send_message("hello", 999, driver)
 
-    assert result is False
-    assert driver.sent == []
+    assert result is True
+    assert driver.sent == [
+        {"text": "hello", "destination_id": 999, "want_ack": True}
+    ]

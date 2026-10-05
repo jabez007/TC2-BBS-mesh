@@ -257,12 +257,15 @@ def process_message(sender_id, message, driver, is_sync_message=False):
                 return
 
             MENU_COMMANDS = ["MAIN_MENU", "BULLETIN_MENU", "BULLETIN_ACTION", "STATS", "JS8CALL_MENU", "MENU", "CHECK_MAIL", "CHECK_BULLETIN", "CHECK_CHANNEL", "LIST_CHANNELS", "CHANNEL_DIRECTORY"]
-            if message_lower in handlers:
-                if state is None or state["command"] in MENU_COMMANDS:
-                    if state and state["command"] == "BULLETIN_ACTION":
-                        handlers[message_lower](sender_id, driver, state)
-                    else:
-                        handlers[message_lower](sender_id, driver)
+            # Outside a menu, a menu letter is an answer to the current step
+            # (a subject, a short name, a content line), so let the step handle it.
+            if message_lower in handlers and (
+                state is None or state["command"] in MENU_COMMANDS
+            ):
+                if state and state["command"] == "BULLETIN_ACTION":
+                    handlers[message_lower](sender_id, driver, state)
+                else:
+                    handlers[message_lower](sender_id, driver)
             elif state:
                 command = state["command"]
                 step = state["step"]

@@ -30,11 +30,12 @@ def send_message(message, destination, driver):
     Handles connection errors and provides decoupled logging for reliability.
     """
     # Normalize the destination to a stable node ID up-front when it comes
-    # from the node map, but preserve driver-specific string destinations
-    # such as broadcasts when they do not exist in the node table.
+    # from the node map. Anything the node map doesn't know is passed through
+    # unchanged: broadcast numbers never appear there, and Meshtastic only adds
+    # a node after its NODEINFO arrives, so new users would get no reply.
     try:
         dest_id = get_node_id_from_num(destination, driver)
-        if not dest_id and isinstance(destination, str) and destination:
+        if not dest_id and destination not in (None, ""):
             dest_id = destination
     except Exception:
         logger.exception(f"Failed to resolve destination ID: {destination}")
@@ -86,7 +87,8 @@ def get_node_info(driver, short_name):
         short_name (str): The short name of the node to search for.
 
     Returns:
-        list: A list of dictionaries containing node 'num', 'shortName', and 'longName'.
+        list: A list of dictionaries containing node 'id', 'num', 'shortName', and 'longName'.
+            Mail is stored and looked up by 'id', so callers addressing mail must use it.
     """
     nodes = []
     for node_id, node in driver.get_nodes().items():
@@ -103,6 +105,7 @@ def get_node_info(driver, short_name):
                 node_num = None
                 
             nodes.append({
+                'id': node_id,
                 'num': node_num,
                 'shortName': s_name,
                 'longName': l_name
