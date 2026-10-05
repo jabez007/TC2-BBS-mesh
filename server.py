@@ -322,7 +322,11 @@ Multi-Mode BBS Engine
         Stops the BBS on SIGTERM (docker stop) or SIGINT (Ctrl-C).
         Clearing running first skips the reconnect delay, and raising
         KeyboardInterrupt unwinds the main thread into shutdown().
+        Later stop signals are ignored so a second Ctrl-C can't cut
+        shutdown() short. Docker still sends SIGKILL if it hangs.
         """
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         logger.info(f"Received {signal.Signals(signum).name}.")
         self.running = False
         raise KeyboardInterrupt

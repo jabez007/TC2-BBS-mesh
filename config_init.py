@@ -159,6 +159,10 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
 
     heartbeat_interval = config.getint("healthcheck", "heartbeat_interval", fallback=10)
     keepalive_interval = config.getint("healthcheck", "keepalive_interval", fallback=120)
+    if keepalive_interval <= 0:
+        # Matches BBS_KEEPALIVE_INTERVAL, which also ignores non-positive values.
+        logger.warning(f"Ignoring keepalive_interval = {keepalive_interval}; it must be positive. Using 120.")
+        keepalive_interval = 120
     low_power = config.getboolean("healthcheck", "low_power", fallback=False)
 
     return {

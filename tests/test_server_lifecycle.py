@@ -56,6 +56,22 @@ def test_keepalive_interval_is_read_from_the_config_file(server, monkeypatch, tm
     assert app.keepalive_interval == 45
 
 
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_keepalive_interval_below_one_second_falls_back_to_the_default(server, monkeypatch, tmp_path, value):
+    # A non-positive interval would send a radio probe on every monitoring cycle.
+    config_file = tmp_path / "bbs.ini"
+    write_config(
+        config_file,
+        f"[database]\ndb_path = {tmp_path / 'bbs.db'}\n\n[healthcheck]\nkeepalive_interval = {value}\n",
+    )
+    monkeypatch.setattr(sys, "argv", ["server.py", "--config", str(config_file)])
+
+    app = server.BBSApp()
+    app._setup_config()
+
+    assert app.keepalive_interval == 120
+
+
 def start_server(tmp_path, db_path=None):
     db_path = db_path or tmp_path / "bbs.db"
     write_config(
@@ -91,12 +107,59 @@ def test_stop_signal_shuts_the_server_down_cleanly(tmp_path, signum):
 
         proc.send_signal(signum)
         # Docker sends SIGKILL 10 seconds after SIGTERM.
-        output, _ = proc.communicate(timeout=5)
+        output, _ = proc.communicate(timeout=8)
     finally:
-        proc.kill()
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
 
     assert proc.returncode == 0, output
     assert "BBS Application shutting down" in output
+    assert not heartbeat.exists()
+
+
+@pytest.fixture
+def restore_signal_handlers():
+    saved = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)}
+    yield
+    for signum, handler in saved.items():
+        signal.signal(signum, handler)
+
+
+def test_second_stop_signal_does_not_interrupt_shutdown(server, monkeypatch, tmp_path, restore_signal_handlers):
+    config_file = tmp_path / "bbs.ini"
+    write_config(config_file, f"[database]\ndb_path = {tmp_path / 'bbs.db'}\n")
+    heartbeat = tmp_path / "bbs_heartbeat"
+    monkeypatch.setenv("BBS_HEARTBEAT_PATH", str(heartbeat))
+    monkeypatch.setattr(sys, "argv", ["server.py", "--config", str(config_file)])
+
+    # docker stop arrives while the monitoring loop sleeps.
+    def sleep_then_stop(_seconds):
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    monkeypatch.setattr("time.sleep", sleep_then_stop)
+
+    # Shutdown waits for in-flight message handlers, which can take seconds.
+    # The operator presses Ctrl-C again during that wait.
+    drained = []
+    real_shutdown_executor = server.shutdown_executor
+
+    def impatient_shutdown_executor(wait=True, **kwargs):
+        if wait:
+            os.kill(os.getpid(), signal.SIGINT)
+        real_shutdown_executor(wait=wait, **kwargs)
+        if wait:
+            drained.append(True)
+
+    monkeypatch.setattr(server, "shutdown_executor", impatient_shutdown_executor)
+
+    app = server.BBSApp()
+    try:
+        app.run()
+    except KeyboardInterrupt:
+        pytest.fail("the second signal escaped run() and cut shutdown short")
+
+    assert drained == [True]
     assert not heartbeat.exists()
 
 
