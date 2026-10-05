@@ -158,6 +158,7 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
     print(f"Nodes with Urgent board permissions: {allowed_nodes}")
 
     heartbeat_interval = config.getint("healthcheck", "heartbeat_interval", fallback=10)
+    keepalive_interval = config.getint("healthcheck", "keepalive_interval", fallback=120)
     low_power = config.getboolean("healthcheck", "low_power", fallback=False)
 
     return {
@@ -170,6 +171,7 @@ def initialize_config(config_file: str = None) -> dict[str, Any]:
         "allowed_nodes": allowed_nodes,
         "mqtt_topic": "meshtastic.receive",
         "heartbeat_interval": heartbeat_interval,
+        "keepalive_interval": keepalive_interval,
         "low_power": low_power,
     }
 
