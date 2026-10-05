@@ -12,6 +12,7 @@ database operations, and third-party integrations (JS8Call).
 
 import logging
 import os
+import signal
 import tempfile
 import threading
 import time
@@ -19,7 +20,7 @@ import time
 from pubsub import pub
 
 from config_init import get_driver, init_cli_parser, initialize_config, merge_config
-from database_core import initialize_database, set_db_path
+from database_core import get_db_path, initialize_database, set_db_path
 from js8call_integration import JS8CallClient
 from message_processing import init_executor, on_receive, shutdown_executor
 
@@ -107,7 +108,11 @@ Multi-Mode BBS Engine
         db_config_path = self.config["config"].get("database", "db_path", fallback=None)
         if db_config_path:
             set_db_path(db_config_path)
-        initialize_database()
+        if not initialize_database():
+            # Every command needs the database, so running without it only
+            # fails each request. Exiting lets the supervisor surface the error.
+            logger.error(f"Could not initialize the database at {get_db_path()}. Exiting.")
+            raise SystemExit(1)
 
         # Monitor Settings
         self.watchdog_timeout = self._get_env_int("BBS_WATCHDOG_TIMEOUT", 300)
@@ -312,6 +317,20 @@ Multi-Mode BBS Engine
             except OSError:
                 pass
 
+    def _handle_stop_signal(self, signum, frame):
+        """
+        Stops the BBS on SIGTERM (docker stop) or SIGINT (Ctrl-C).
+        Clearing running first skips the reconnect delay, and raising
+        KeyboardInterrupt unwinds the main thread into shutdown().
+        Later stop signals are ignored so a second Ctrl-C can't cut
+        shutdown() short. Docker still sends SIGKILL if it hangs.
+        """
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        logger.info(f"Received {signal.Signals(signum).name}.")
+        self.running = False
+        raise KeyboardInterrupt
+
     def run(self):
         """
         The primary execution entry point. Implements the high-level retry loop 
@@ -320,6 +339,9 @@ Multi-Mode BBS Engine
         self._display_banner()
         self._setup_config()
         assert self.config is not None
+
+        signal.signal(signal.SIGTERM, self._handle_stop_signal)
+        signal.signal(signal.SIGINT, self._handle_stop_signal)
 
         try:
             while self.running:
