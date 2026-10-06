@@ -72,6 +72,28 @@ def test_keepalive_interval_below_one_second_falls_back_to_the_default(server, m
     assert app.keepalive_interval == 120
 
 
+@pytest.mark.parametrize(
+    ("config_value", "cli_args"),
+    [("0", []), ("-1", []), ("10", ["--heartbeat-interval", "0"])],
+    ids=["config-zero", "config-negative", "cli-zero"],
+)
+def test_heartbeat_interval_below_one_second_falls_back_to_the_default(
+    server, monkeypatch, tmp_path, config_value, cli_args
+):
+    # A zero interval makes the monitoring loop spin without sleeping.
+    config_file = tmp_path / "bbs.ini"
+    write_config(
+        config_file,
+        f"[database]\ndb_path = {tmp_path / 'bbs.db'}\n\n[healthcheck]\nheartbeat_interval = {config_value}\n",
+    )
+    monkeypatch.setattr(sys, "argv", ["server.py", "--config", str(config_file), *cli_args])
+
+    app = server.BBSApp()
+    app._setup_config()
+
+    assert app.heartbeat_interval == 10
+
+
 def start_server(tmp_path, db_path=None):
     db_path = db_path or tmp_path / "bbs.db"
     write_config(
