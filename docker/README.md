@@ -44,6 +44,20 @@ docker run -d \
   thealhu/tc2-bbs-mesh:latest
 ```
 
+### Building the image
+
+The Dockerfile copies this repository's code into the image, so run the build from the repository root, not from `docker/`:
+
+```bash
+docker build -f docker/Dockerfile -t tc2-bbs-mesh .
+```
+
+Or build and start it with the bundled Compose file, which sets the same context:
+
+```bash
+docker compose -f docker/docker-compose.yaml up -d --build
+```
+
 ### First Run
 When you first run the container, it will automatically detect if your `./config` directory is empty. It will initialize it with:
 - `config.ini`: The main configuration file (copied from `example_config.ini`).
