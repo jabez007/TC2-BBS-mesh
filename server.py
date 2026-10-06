@@ -124,6 +124,10 @@ Multi-Mode BBS Engine
             self.keepalive_interval = self.config.get('keepalive_interval', 120)
 
         self.heartbeat_interval = self.config.get('heartbeat_interval', 10)
+        if self.heartbeat_interval <= 0:
+            # The healthcheck applies the same fallback, so both expect the same cadence.
+            logger.warning(f"Ignoring heartbeat_interval = {self.heartbeat_interval}; it must be positive. Using 10.")
+            self.heartbeat_interval = 10
 
         # Low power mode overrides intervals to minimize radio traffic and local CPU cycles.
         if self.config.get('low_power'):
