@@ -1,6 +1,8 @@
 services:
   tc2-bbs-mesh:
-    build: .
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
     restart: always
     volumes:
       - ./config:/home/mesh/bbs/config

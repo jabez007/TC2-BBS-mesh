@@ -1,0 +1,16 @@
+# Keep the build context to what docker/Dockerfile copies. In particular,
+# never send the compose config volume (docker/config) or local databases.
+.git
+.github
+.venv
+venv
+**/__pycache__
+**/*.pyc
+tests
+run
+config
+docker/config
+config.ini
+**/*.db
+**/*.db-wal
+**/*.db-shm
