@@ -44,11 +44,25 @@ docker run -d \
   thealhu/tc2-bbs-mesh:latest
 ```
 
+### Building the image
+
+The Dockerfile copies this repository's code into the image, so run the build from the repository root, not from `docker/`:
+
+```bash
+docker build -f docker/Dockerfile -t tc2-bbs-mesh .
+```
+
+Or build and start it with the bundled Compose file, which sets the same context:
+
+```bash
+docker compose -f docker/docker-compose.yaml up -d --build
+```
+
 ### First Run
 When you first run the container, it will automatically detect if your `./config` directory is empty. It will initialize it with:
 - `config.ini`: The main configuration file (copied from `example_config.ini`).
 - `fortunes.txt`: The data file for the Fortune Teller feature.
-- `bulletins.db`: The SQLite database file (automatically created on startup).
+- `bbs.db`: The SQLite database file (automatically created on startup).
 
 ## Configuration
 
@@ -58,8 +72,12 @@ After the first run, you should edit `./config/config.ini` to set your interface
 
 All your data is stored in the volume you mount to `/home/mesh/bbs/config`. This includes:
 - **Settings**: `config.ini`
-- **Messages & Bulletins**: `bulletins.db`
+- **Messages & Bulletins**: `bbs.db`
 - **Fortunes**: `fortunes.txt`
+
+### Upgrading from `bulletins.db`
+
+Earlier images stored data in `bulletins.db`. If that file is in your config volume, the BBS copies its bulletins, mail, and channels into `bbs.db` on the first start. It leaves `bulletins.db` unchanged and won't import it again. Check the container log for skipped rows, then delete the old file.
 
 ## Permission Issues (Proxmox / Linux Hosts)
 

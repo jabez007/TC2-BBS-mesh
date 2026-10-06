@@ -1,5 +1,8 @@
 __pycache__/
 bulletins.db
+bbs.db
+*.db-wal
+*.db-shm
 js8call.db
 venv/
 .venv
